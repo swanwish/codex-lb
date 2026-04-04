@@ -55,3 +55,14 @@ When the required signing and notarization credentials are configured, the macOS
 - **AND** the generated DMG is codesigned
 - **AND** the generated DMG is submitted for notarization
 - **AND** the notarization ticket is stapled to the DMG before release publication
+
+### Requirement: maintainers can run a macOS-only packaging workflow without a full release
+
+The project MUST provide a manually triggered GitHub Actions workflow that builds macOS package artifacts for both Apple Silicon and Intel runners without requiring PyPI, Docker, Helm, or GitHub Release publication to complete.
+
+#### Scenario: maintainer runs the macOS-only packaging workflow
+
+- **WHEN** a maintainer manually dispatches the dedicated macOS packaging workflow for a branch, tag, or commit
+- **THEN** it uploads an `arm64` macOS artifact set as a workflow artifact
+- **AND** it uploads an `x86_64` macOS artifact set as a workflow artifact
+- **AND** it can optionally sign and notarize the DMG when the documented secrets are configured

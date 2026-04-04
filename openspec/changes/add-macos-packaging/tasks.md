@@ -15,3 +15,5 @@
 - [x] 3.4 Add release automation that publishes macOS arm64 and x86_64 artifacts to GitHub Releases.
 - [x] 3.5 Extend the macOS packaging flow to emit DMGs and optional signing/notarization outputs.
 - [x] 3.6 Document the Intel Mac distribution path and required signing/notarization secrets.
+- [x] 3.7 Add a manually triggered macOS-only GitHub Actions workflow that uploads arm64 and x86_64 package artifacts.
+- [x] 3.8 Document how to configure and run the macOS-only workflow without the full release pipeline.
