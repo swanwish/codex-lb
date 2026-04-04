@@ -184,6 +184,7 @@ pushd "${ROOT_DIR}" >/dev/null
 CODEX_LB_PYINSTALLER_APP_NAME="${APP_NAME}" \
 CODEX_LB_PROJECT_ROOT="${ROOT_DIR}" \
 uv run --extra metrics --extra tracing --with pyinstaller==6.16.0 \
+  --frozen \
   pyinstaller \
   --clean \
   --noconfirm \
