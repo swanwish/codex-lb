@@ -8,6 +8,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(os.environ.get("CODEX_LB_PROJECT_ROOT", Path.cwd())).resolve()
 APP_NAME = os.environ.get("CODEX_LB_PYINSTALLER_APP_NAME", "codex-lb")
+CODE_SIGN_IDENTITY = os.environ.get("CODEX_LB_MACOS_CODESIGN_IDENTITY") or None
 
 
 def _data_tree(directory: Path) -> list[tuple[str, str]]:
@@ -80,6 +81,6 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
+    codesign_identity=CODE_SIGN_IDENTITY,
     entitlements_file=None,
 )
