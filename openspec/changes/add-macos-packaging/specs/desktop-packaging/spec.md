@@ -46,11 +46,12 @@ The release workflow MUST build macOS release artifacts for both Apple Silicon a
 
 ### Requirement: macOS release automation supports codesigning and notarization
 
-When the required signing and notarization credentials are configured, the macOS release workflow MUST sign the packaged executable, notarize the generated DMG, and staple the notarization ticket before publishing the artifact.
+When the required signing and notarization credentials are configured, the macOS release workflow MUST sign the packaged executable and generated DMG, notarize the generated DMG, and staple the notarization ticket before publishing the artifact.
 
 #### Scenario: signing credentials are configured for a release build
 
 - **WHEN** the release workflow runs with the documented macOS signing and notarization secrets
 - **THEN** the packaged executable is codesigned
+- **AND** the generated DMG is codesigned
 - **AND** the generated DMG is submitted for notarization
 - **AND** the notarization ticket is stapled to the DMG before release publication

@@ -18,7 +18,7 @@ Build a self-contained macOS executable with PyInstaller and stage release artif
 Options:
   --rebuild-frontend  Rebuild app/static before packaging.
   --skip-frontend     Skip frontend build and require app/static to already exist.
-  --sign              Codesign the staged executable using CODEX_LB_MACOS_CODESIGN_IDENTITY.
+  --sign              Codesign the staged executable and generated DMG using CODEX_LB_MACOS_CODESIGN_IDENTITY.
   --notarize          Submit the DMG with notarytool and staple the result (implies --sign).
 EOF
 }
@@ -106,7 +106,7 @@ build_frontend() {
   popd >/dev/null
 }
 
-codesign_path() {
+codesign_executable() {
   local path="$1"
 
   require_env_var CODEX_LB_MACOS_CODESIGN_IDENTITY
@@ -119,6 +119,20 @@ codesign_path() {
     --sign "${CODEX_LB_MACOS_CODESIGN_IDENTITY}" \
     "${path}"
   codesign --verify --strict --verbose=2 "${path}"
+}
+
+codesign_dmg() {
+  local path="$1"
+
+  require_env_var CODEX_LB_MACOS_CODESIGN_IDENTITY
+
+  echo "Codesigning disk image ${path}..."
+  codesign \
+    --force \
+    --timestamp \
+    --sign "${CODEX_LB_MACOS_CODESIGN_IDENTITY}" \
+    "${path}"
+  codesign --verify --verbose=2 "${path}"
 }
 
 create_dmg() {
@@ -205,11 +219,15 @@ cp "${ROOT_DIR}/packaging/macos/README.txt" "${RELEASE_DIR}/README.txt"
 chmod +x "${RELEASE_DIR}/${APP_NAME}"
 
 if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
-  codesign_path "${RELEASE_DIR}/${APP_NAME}"
+  codesign_executable "${RELEASE_DIR}/${APP_NAME}"
 fi
 
 tar -C "${ROOT_DIR}/dist" -czf "${ARCHIVE_PATH}" "$(basename "${RELEASE_DIR}")"
 create_dmg "${RELEASE_DIR}" "${DMG_PATH}" "${APP_NAME}-${ARCH}"
+
+if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
+  codesign_dmg "${DMG_PATH}"
+fi
 
 if [[ "${NOTARIZE_ARTIFACTS}" == "true" ]]; then
   notarize_dmg "${DMG_PATH}"

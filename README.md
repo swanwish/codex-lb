@@ -90,7 +90,7 @@ If you are building locally for an Intel Mac, run the same command on Intel hard
 
 ### Signed / Notarized macOS releases
 
-The release workflow can optionally codesign the staged binary, create a DMG, submit the DMG for notarization, and staple the notarization ticket before attaching the artifacts to the GitHub Release.
+The release workflow can optionally codesign the staged binary and DMG, submit the DMG for notarization, and staple the notarization ticket before attaching the artifacts to the GitHub Release.
 
 To enable that path, configure these repository secrets:
 
