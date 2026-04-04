@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from functools import lru_cache
 from ipaddress import ip_network
 from pathlib import Path
@@ -9,7 +10,16 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+
+def _runtime_base_dir() -> Path:
+    # Packaged binaries should read adjacent .env files from the executable
+    # directory instead of PyInstaller's transient extraction root.
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[3]
+
+
+BASE_DIR = _runtime_base_dir()
 
 DOCKER_DATA_DIR = Path("/var/lib/codex-lb")
 DOCKER_CALLBACK_HOST = "0.0.0.0"

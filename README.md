@@ -59,6 +59,72 @@ uvx codex-lb
 
 Open [localhost:2455](http://localhost:2455) → Add account → Done.
 
+## macOS Executable Build
+
+Build a self-contained macOS archive locally:
+
+```bash
+./scripts/build_macos_executable.sh
+```
+
+If you need fresh frontend assets first:
+
+```bash
+./scripts/build_macos_executable.sh --rebuild-frontend
+```
+
+This produces:
+
+- `dist/codex-lb-macos-<arch>.tar.gz`
+- `dist/codex-lb-macos-<arch>.dmg`
+- `dist/codex-lb-macos-<arch>.sha256`
+
+Recipients do not need a local Python installation. They can place `.env.local` next to the executable and run `./codex-lb`.
+
+Each build is architecture-specific:
+
+- Apple Silicon builders produce `...-arm64`
+- Intel Mac builders produce `...-x86_64`
+
+If you are building locally for an Intel Mac, run the same command on Intel hardware. The release workflow publishes both architectures automatically.
+
+### GitHub Actions: macOS-only packaging
+
+If you only want macOS artifacts and do not want to run the full release pipeline, use the dedicated `macOS Package` workflow in GitHub Actions.
+
+How to use it:
+
+1. Open `Actions -> macOS Package -> Run workflow`
+2. Optionally set `git_ref` to the branch, tag, or commit you want to package
+3. Set `sign_artifacts=true` if you want codesigning
+4. Set `notarize_artifacts=true` if you also want Apple notarization
+
+This workflow always uploads workflow artifacts for both architectures:
+
+- `macos-package-arm64`
+- `macos-package-x86_64`
+
+It does not publish to PyPI, GHCR, Helm, or GitHub Releases.
+
+### Signed / Notarized macOS releases
+
+Both the full `Release` workflow and the macOS-only packaging workflow can optionally codesign the staged binary and DMG, submit the DMG for notarization, and staple the notarization ticket.
+
+To enable that path, configure these repository secrets:
+
+- `CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64`
+- `CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD`
+- `CODEX_LB_MACOS_CODESIGN_IDENTITY`
+- `CODEX_LB_MACOS_NOTARY_APPLE_ID`
+- `CODEX_LB_MACOS_NOTARY_TEAM_ID`
+- `CODEX_LB_MACOS_NOTARY_APP_PASSWORD`
+
+If those secrets are not present, the workflow still publishes unsigned macOS archives and DMGs. Unsigned binaries downloaded from the internet may require:
+
+```bash
+xattr -dr com.apple.quarantine ./codex-lb
+```
+
 ## Client Setup
 
 Point any OpenAI-compatible client at codex-lb. If [API key auth](#api-key-authentication) is enabled, pass a key from the dashboard as a Bearer token.

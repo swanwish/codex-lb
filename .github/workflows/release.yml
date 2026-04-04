@@ -110,6 +110,107 @@ jobs:
           name: dist
           path: dist/*
 
+  macos-release:
+    name: macOS release (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x86_64
+            runner: macos-13
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.0.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Import signing certificate
+        if: ${{ secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64 != '' && secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD != '' && secrets.CODEX_LB_MACOS_CODESIGN_IDENTITY != '' }}
+        shell: bash
+        env:
+          CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64 }}
+          CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="${RUNNER_TEMP}/codex-lb-signing.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/codex-lb-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          export CERT_PATH
+
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          Path(os.environ["CERT_PATH"]).write_bytes(
+              base64.b64decode(os.environ["CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64"])
+          )
+          PY
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERT_PATH}" \
+            -k "${KEYCHAIN_PATH}" \
+            -P "${CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/xcrun
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+          security default-keychain -d user -s "${KEYCHAIN_PATH}"
+
+      - name: Build macOS release artifacts
+        shell: bash
+        env:
+          CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64 }}
+          CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+          CODEX_LB_MACOS_CODESIGN_IDENTITY: ${{ secrets.CODEX_LB_MACOS_CODESIGN_IDENTITY }}
+          CODEX_LB_MACOS_NOTARY_APPLE_ID: ${{ secrets.CODEX_LB_MACOS_NOTARY_APPLE_ID }}
+          CODEX_LB_MACOS_NOTARY_TEAM_ID: ${{ secrets.CODEX_LB_MACOS_NOTARY_TEAM_ID }}
+          CODEX_LB_MACOS_NOTARY_APP_PASSWORD: ${{ secrets.CODEX_LB_MACOS_NOTARY_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          args=(--rebuild-frontend)
+
+          signing_enabled="false"
+          if [[ -n "${CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64:-}" && -n "${CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD:-}" && -n "${CODEX_LB_MACOS_CODESIGN_IDENTITY:-}" ]]; then
+            signing_enabled="true"
+            args+=(--sign)
+          fi
+
+          if [[ "${signing_enabled}" == "true" && -n "${CODEX_LB_MACOS_NOTARY_APPLE_ID:-}" && -n "${CODEX_LB_MACOS_NOTARY_TEAM_ID:-}" && -n "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD:-}" ]]; then
+            args+=(--notarize)
+          fi
+
+          ./scripts/build_macos_executable.sh "${args[@]}"
+
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/codex-lb-macos-${{ matrix.arch }}.tar.gz
+            dist/codex-lb-macos-${{ matrix.arch }}.dmg
+            dist/codex-lb-macos-${{ matrix.arch }}.sha256
+
   publish-to-pypi:
     name: Publish to PyPI
     needs: [build]
@@ -249,7 +350,7 @@ jobs:
 
   create-github-release:
     name: Create GitHub Release
-    needs: [publish-to-pypi, docker-image, helm-chart]
+    needs: [publish-to-pypi, docker-image, helm-chart, macos-release]
     runs-on: ubuntu-24.04
 
     permissions:
@@ -267,6 +368,13 @@ jobs:
         with:
           name: dist
           path: dist
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: dist
+          merge-multiple: true
 
       - name: Resolve previous tag
         id: prev_tag
@@ -328,6 +436,8 @@ jobs:
             echo "docker pull ghcr.io/${GITHUB_REPOSITORY}:${TAG_VERSION}"
             echo "helm install codex-lb oci://ghcr.io/soju06/charts/codex-lb --version ${TAG_VERSION}"
             echo '```'
+            echo
+            echo 'macOS release artifacts for Apple Silicon (`arm64`) and Intel (`x86_64`) are attached below.'
           } >> release_notes.md
 
       - name: Create GitHub Release
