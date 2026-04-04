@@ -59,6 +59,22 @@ uvx codex-lb
 
 Open [localhost:2455](http://localhost:2455) → Add account → Done.
 
+## macOS Executable Build
+
+Build a self-contained macOS archive locally:
+
+```bash
+./scripts/build_macos_executable.sh
+```
+
+If you need fresh frontend assets first:
+
+```bash
+./scripts/build_macos_executable.sh --rebuild-frontend
+```
+
+This produces `dist/codex-lb-macos-<arch>.tar.gz`. Recipients do not need a local Python installation. They can place `.env.local` next to the executable and run `./codex-lb`.
+
 ## Client Setup
 
 Point any OpenAI-compatible client at codex-lb. If [API key auth](#api-key-authentication) is enabled, pass a key from the dashboard as a Bearer token.
