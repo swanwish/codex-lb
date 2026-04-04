@@ -11,7 +11,9 @@ Usage
 4. Open http://127.0.0.1:2455
 
 Notes
+- This package is architecture-specific. Use the matching arm64 or x86_64 build for your Mac.
+- GitHub Releases may also include a DMG for the same architecture. Prefer the DMG if you want the notarized distribution artifact.
 - Recipients do not need a local Python installation.
 - Default data directory remains ~/.codex-lb/
-- Unsigned binaries downloaded from the internet may require:
+- Unsigned archives downloaded from the internet may require:
   xattr -dr com.apple.quarantine ./codex-lb

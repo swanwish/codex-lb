@@ -6,16 +6,20 @@ APP_NAME="codex-lb"
 ARCHIVE_PREFIX="${APP_NAME}-macos"
 REBUILD_FRONTEND="false"
 SKIP_FRONTEND="false"
+SIGN_ARTIFACTS="false"
+NOTARIZE_ARTIFACTS="false"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/build_macos_executable.sh [--rebuild-frontend] [--skip-frontend]
+Usage: scripts/build_macos_executable.sh [--rebuild-frontend] [--skip-frontend] [--sign] [--notarize]
 
-Build a self-contained macOS executable with PyInstaller and stage a release tarball.
+Build a self-contained macOS executable with PyInstaller and stage release artifacts.
 
 Options:
   --rebuild-frontend  Rebuild app/static before packaging.
   --skip-frontend     Skip frontend build and require app/static to already exist.
+  --sign              Codesign the staged executable using CODEX_LB_MACOS_CODESIGN_IDENTITY.
+  --notarize          Submit the DMG with notarytool and staple the result (implies --sign).
 EOF
 }
 
@@ -27,6 +31,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-frontend)
       SKIP_FRONTEND="true"
+      shift
+      ;;
+    --sign)
+      SIGN_ARTIFACTS="true"
+      shift
+      ;;
+    --notarize)
+      SIGN_ARTIFACTS="true"
+      NOTARIZE_ARTIFACTS="true"
       shift
       ;;
     -h|--help)
@@ -45,6 +58,14 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This packaging script only supports macOS builders." >&2
   exit 1
 fi
+
+require_env_var() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "Missing required environment variable: ${name}" >&2
+    exit 1
+  fi
+}
 
 detect_frontend_pm() {
   if command -v bun >/dev/null 2>&1; then
@@ -85,6 +106,55 @@ build_frontend() {
   popd >/dev/null
 }
 
+codesign_path() {
+  local path="$1"
+
+  require_env_var CODEX_LB_MACOS_CODESIGN_IDENTITY
+
+  echo "Codesigning ${path}..."
+  codesign \
+    --force \
+    --timestamp \
+    --options runtime \
+    --sign "${CODEX_LB_MACOS_CODESIGN_IDENTITY}" \
+    "${path}"
+  codesign --verify --strict --verbose=2 "${path}"
+}
+
+create_dmg() {
+  local source_dir="$1"
+  local dmg_path="$2"
+  local volume_name="$3"
+
+  echo "Creating DMG ${dmg_path}..."
+  hdiutil create \
+    -volname "${volume_name}" \
+    -srcfolder "${source_dir}" \
+    -ov \
+    -format UDZO \
+    "${dmg_path}" \
+    >/dev/null
+}
+
+notarize_dmg() {
+  local dmg_path="$1"
+
+  require_env_var CODEX_LB_MACOS_NOTARY_APPLE_ID
+  require_env_var CODEX_LB_MACOS_NOTARY_TEAM_ID
+  require_env_var CODEX_LB_MACOS_NOTARY_APP_PASSWORD
+
+  echo "Submitting ${dmg_path} for notarization..."
+  xcrun notarytool submit "${dmg_path}" \
+    --apple-id "${CODEX_LB_MACOS_NOTARY_APPLE_ID}" \
+    --team-id "${CODEX_LB_MACOS_NOTARY_TEAM_ID}" \
+    --password "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD}" \
+    --wait
+
+  echo "Stapling notarization ticket to ${dmg_path}..."
+  xcrun stapler staple "${dmg_path}"
+  xcrun stapler validate "${dmg_path}"
+}
+
 STATIC_INDEX="${ROOT_DIR}/app/static/index.html"
 if [[ "${SKIP_FRONTEND}" == "true" ]]; then
   if [[ ! -f "${STATIC_INDEX}" ]]; then
@@ -103,8 +173,10 @@ PYI_DIST_DIR="${ROOT_DIR}/dist/pyinstaller/${PLATFORM_ID}"
 PYI_WORK_DIR="${ROOT_DIR}/build/pyinstaller/${PLATFORM_ID}"
 RELEASE_DIR="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}"
 ARCHIVE_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.tar.gz"
+DMG_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.dmg"
+CHECKSUM_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.sha256"
 
-rm -rf "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${RELEASE_DIR}" "${ARCHIVE_PATH}"
+rm -rf "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${DMG_PATH}" "${CHECKSUM_PATH}"
 mkdir -p "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${RELEASE_DIR}"
 
 echo "Packaging ${APP_NAME} for ${PLATFORM_ID}..."
@@ -131,9 +203,24 @@ cp "${ROOT_DIR}/.env.example" "${RELEASE_DIR}/.env.example"
 cp "${ROOT_DIR}/packaging/macos/README.txt" "${RELEASE_DIR}/README.txt"
 chmod +x "${RELEASE_DIR}/${APP_NAME}"
 
+if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
+  codesign_path "${RELEASE_DIR}/${APP_NAME}"
+fi
+
 tar -C "${ROOT_DIR}/dist" -czf "${ARCHIVE_PATH}" "$(basename "${RELEASE_DIR}")"
+create_dmg "${RELEASE_DIR}" "${DMG_PATH}" "${APP_NAME}-${ARCH}"
+
+if [[ "${NOTARIZE_ARTIFACTS}" == "true" ]]; then
+  notarize_dmg "${DMG_PATH}"
+fi
+
+pushd "${ROOT_DIR}/dist" >/dev/null
+shasum -a 256 "$(basename "${ARCHIVE_PATH}")" "$(basename "${DMG_PATH}")" > "$(basename "${CHECKSUM_PATH}")"
+popd >/dev/null
 
 echo
 echo "Build complete:"
 echo "  Binary:  ${RELEASE_DIR}/${APP_NAME}"
 echo "  Archive: ${ARCHIVE_PATH}"
+echo "  DMG:     ${DMG_PATH}"
+echo "  SHA256:  ${CHECKSUM_PATH}"

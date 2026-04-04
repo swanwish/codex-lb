@@ -73,7 +73,39 @@ If you need fresh frontend assets first:
 ./scripts/build_macos_executable.sh --rebuild-frontend
 ```
 
-This produces `dist/codex-lb-macos-<arch>.tar.gz`. Recipients do not need a local Python installation. They can place `.env.local` next to the executable and run `./codex-lb`.
+This produces:
+
+- `dist/codex-lb-macos-<arch>.tar.gz`
+- `dist/codex-lb-macos-<arch>.dmg`
+- `dist/codex-lb-macos-<arch>.sha256`
+
+Recipients do not need a local Python installation. They can place `.env.local` next to the executable and run `./codex-lb`.
+
+Each build is architecture-specific:
+
+- Apple Silicon builders produce `...-arm64`
+- Intel Mac builders produce `...-x86_64`
+
+If you are building locally for an Intel Mac, run the same command on Intel hardware. The release workflow publishes both architectures automatically.
+
+### Signed / Notarized macOS releases
+
+The release workflow can optionally codesign the staged binary, create a DMG, submit the DMG for notarization, and staple the notarization ticket before attaching the artifacts to the GitHub Release.
+
+To enable that path, configure these repository secrets:
+
+- `CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64`
+- `CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD`
+- `CODEX_LB_MACOS_CODESIGN_IDENTITY`
+- `CODEX_LB_MACOS_NOTARY_APPLE_ID`
+- `CODEX_LB_MACOS_NOTARY_TEAM_ID`
+- `CODEX_LB_MACOS_NOTARY_APP_PASSWORD`
+
+If those secrets are not present, the workflow still publishes unsigned macOS archives and DMGs. Unsigned binaries downloaded from the internet may require:
+
+```bash
+xattr -dr com.apple.quarantine ./codex-lb
+```
 
 ## Client Setup
 
