@@ -1,25 +1,28 @@
 ## Purpose
 
-本文档给最终用户使用，说明在收到 `codex-lb` 的 macOS 分发包后，应如何安装、配置并开始使用。
+本文档面向最终用户和维护者，说明收到 `codex-lb` 的 macOS 分发包之后，应该如何安装、初始化配置并从 Terminal 直接启动服务。
 
-适用场景：
+这里记录的是面向人的说明和运维约定；规范性要求仍以 `spec.md` 为准。
 
-- 维护者将 DMG 或压缩包发给内部用户
-- 团队内部做小范围试用或正式发布
-- 需要给最终用户一份可直接照着操作的说明
+## 为什么改成 PKG
 
-规范性要求仍然以 `spec.md` 为准；这里仅提供面向人的安装、配置和运维说明。
+相比 `DMG + 手动复制目录`，`PKG` 更符合这类“本地服务 + Terminal 入口”工具的分发方式：
+
+- 安装完成后可直接在 Terminal 中运行 `codex-lb`
+- 运行时文件位于系统安装目录，不要求用户手工拖拽或复制
+- 用户配置和数据位于自己的 home 目录，不需要修改系统安装目录里的文件
+- 适合后续继续接入签名、公证和自动化发布
 
 ## 用户会收到什么
 
-维护者通常会提供下面这些与架构对应的文件：
+维护者通常会分发以下文件：
 
-- `codex-lb-macos-arm64.dmg`，用于 Apple Silicon Mac
-- `codex-lb-macos-x86_64.dmg`，用于 Intel Mac
-- `codex-lb-macos-<arch>.tar.gz`，用于手动解压安装
-- `codex-lb-macos-<arch>.sha256`，用于校验下载文件完整性
+- `codex-lb-macos-arm64.pkg`，用于 Apple Silicon Mac
+- `codex-lb-macos-x86_64.pkg`，用于 Intel Mac
+- `codex-lb-macos-<arch>.tar.gz`，用于手动安装或排障
+- `codex-lb-macos-<arch>.sha256`，用于校验完整性
 
-如果用户不确定自己机器的架构，可以在终端执行：
+用户如果不确定机器架构，可以执行：
 
 ```bash
 uname -m
@@ -30,44 +33,58 @@ uname -m
 - `arm64` 表示 Apple Silicon
 - `x86_64` 表示 Intel
 
-安装包目录内通常包含：
+## 安装后的目录布局
 
-- `codex-lb` 可执行文件
-- `.env.example` 示例配置文件
-- `README.txt` 简版说明
+PKG 安装完成后，关键路径如下：
 
-最终用户不需要额外安装 Python、`uv`、Bun，也不需要保留源码仓库。
+- 终端命令：`/usr/local/bin/codex-lb`
+- 运行时文件：`/Library/Application Support/codex-lb/`
+- 新安装的默认用户配置/数据目录：`~/Library/Application Support/codex-lb/`
+
+兼容性说明：
+
+- 如果用户过去已经在 `~/.codex-lb/` 下运行过旧版本，安装后的新命令仍会继续兼容这个旧目录
+- 对于“第一次安装”的用户，推荐统一使用 `~/Library/Application Support/codex-lb/`
 
 ## 安装步骤
 
-### 推荐方式：使用 DMG
+### 推荐方式：使用 PKG
 
-1. 下载与本机架构匹配的 DMG 文件。
-2. 如有需要，使用配套的 `.sha256` 文件校验完整性。
-3. 打开 DMG，将内容复制到本地可写目录，例如 `~/Applications/codex-lb/`。
-4. 打开终端并进入该目录。
-5. 启动服务：
+1. 下载与本机架构匹配的 PKG 文件。
+2. 如有需要，使用配套的 `.sha256` 校验文件完整性。
+3. 双击 PKG 并完成安装。
+4. 打开一个新的 Terminal 窗口。
+5. 首次初始化配置时，执行：
 
 ```bash
-./codex-lb --host 127.0.0.1 --port 2455
+codex-lb init
 ```
 
-6. 在浏览器打开 `http://127.0.0.1:2455`。
+6. 启动服务：
 
-优先推荐 DMG，因为签名和 notarization 都是围绕分发产物完成的，普通用户的打开体验更稳定。
+```bash
+codex-lb
+```
+
+7. 在浏览器打开 `http://127.0.0.1:2455`。
+
+说明：
+
+- `codex-lb init` 会在用户配置目录里创建 `.env.local`
+- 如果用户不需要自定义配置，也可以直接运行 `codex-lb`
 
 ### 备选方式：使用 tar.gz
 
-如果不方便分发 DMG，也可以直接发压缩包：
+如果不方便分发 PKG，也可以直接分发压缩包：
 
 ```bash
 mkdir -p ~/Applications/codex-lb
 tar -xzf codex-lb-macos-<arch>.tar.gz -C ~/Applications/codex-lb --strip-components=1
 cd ~/Applications/codex-lb
-./codex-lb --host 127.0.0.1 --port 2455
+./codex-lb
 ```
 
-如果压缩包来自未签名的内部构建，macOS 可能会给文件打上 quarantine 标记。这种情况下可执行：
+如果压缩包来自未签名或未公证的内部构建，macOS 可能会附加 quarantine 标记。这种情况下可执行：
 
 ```bash
 xattr -dr com.apple.quarantine ./codex-lb
@@ -75,51 +92,77 @@ xattr -dr com.apple.quarantine ./codex-lb
 
 ## 首次配置
 
-打包后的可执行文件会从自身所在目录读取 `.env` 和 `.env.local`。
+### 推荐方式：使用 `codex-lb init`
 
-推荐首次启动前执行：
+安装后的推荐初始化命令：
 
 ```bash
-cp .env.example .env.local
+codex-lb init
 ```
 
-多数用户无需修改太多配置，默认值已经适合单机本地使用。只有在维护者明确要求时，才需要改动配置。
+这会在默认用户配置目录中创建：
 
-### 常见配置项
+- `~/Library/Application Support/codex-lb/.env.local`
+
+并把安装目录里的示例配置复制过去：
+
+- `/Library/Application Support/codex-lb/.env.example`
+
+### 手动创建配置
+
+如果不想使用 `codex-lb init`，也可以手动创建：
+
+```bash
+mkdir -p ~/Library/Application\ Support/codex-lb
+cp "/Library/Application Support/codex-lb/.env.example" \
+  ~/Library/Application\ Support/codex-lb/.env.local
+```
+
+### 旧目录兼容
+
+如果用户之前已经使用过旧版并保留了：
+
+- `~/.codex-lb/.env`
+- `~/.codex-lb/.env.local`
+
+新安装的 `codex-lb` 仍会兼容读取这些文件，避免升级后立刻失效。
+
+## 常见配置项
 
 - `CODEX_LB_DATABASE_URL`
-  默认是本地 SQLite，路径为 `~/.codex-lb/store.db`
+  Fresh PKG installs 默认使用本地 SQLite，路径是 `~/Library/Application Support/codex-lb/store.db`
 - `CODEX_LB_DATABASE_MIGRATE_ON_STARTUP`
-  默认应保持 `true`，这样升级后会自动执行数据库迁移
+  建议保持 `true`
 - `CODEX_LB_UPSTREAM_BASE_URL`
   默认值为 `https://chatgpt.com/backend-api`
 - `CODEX_LB_OAUTH_CALLBACK_PORT`
   默认是 `1455`，通常不应修改
 
-适合个人本地运行的 `.env.local` 示例：
+适合新安装 PKG 用户的 `.env.local` 示例：
 
 ```bash
-CODEX_LB_DATABASE_URL=sqlite+aiosqlite:///~/.codex-lb/store.db
+CODEX_LB_DATABASE_URL="sqlite+aiosqlite:///~/Library/Application Support/codex-lb/store.db"
 CODEX_LB_DATABASE_MIGRATE_ON_STARTUP=true
 ```
 
 ## 首次使用流程
 
-1. 启动 `codex-lb`。
-2. 在浏览器访问 `http://127.0.0.1:2455`。
-3. 如果维护者启用了 dashboard 登录保护，先用分发时提供的密码或 TOTP 完成登录。
-4. 在 dashboard 中添加 ChatGPT 账号。
-5. 等待账号状态变成可用。
-6. 将你的客户端指向本地代理地址。
+1. 运行 `codex-lb init`
+2. 如需自定义配置，编辑 `~/Library/Application Support/codex-lb/.env.local`
+3. 运行 `codex-lb`
+4. 在浏览器访问 `http://127.0.0.1:2455`
+5. 登录 dashboard
+6. 添加 ChatGPT 账号
+7. 将客户端指向本地代理地址
 
-## 客户端如何接入
+## 客户端接入
 
 常见接入地址如下：
 
 - Codex CLI：`http://127.0.0.1:2455/backend-api/codex`
 - OpenAI 兼容客户端：`http://127.0.0.1:2455/v1`
 
-Codex CLI 常见配置示例：
+Codex CLI 配置示例：
 
 ```toml
 base_url = "http://127.0.0.1:2455/backend-api/codex"
@@ -132,58 +175,59 @@ OPENAI_BASE_URL=http://127.0.0.1:2455/v1
 OPENAI_API_KEY=dummy
 ```
 
-说明：
-
-- 如果维护者没有启用 API Key 校验，兼容客户端通常可使用任意占位字符串作为 `API key`
-- 如果维护者启用了 API Key 校验，用户需要先在 dashboard 中创建 API key，再将该 key 配置到自己的客户端
-
-## 运行与升级说明
+## 运行与升级
 
 默认运行信息如下：
 
-- 数据目录：`~/.codex-lb/`
+- 启动命令：`codex-lb`
+- 安装目录：`/Library/Application Support/codex-lb/`
+- 新安装默认数据目录：`~/Library/Application Support/codex-lb/`
+- 兼容旧数据目录：`~/.codex-lb/`
 - 服务端口：`2455`
 - OAuth 回调端口：`1455`
-- 健康检查地址：`http://127.0.0.1:2455/health`
+- 健康检查：`http://127.0.0.1:2455/health`
 
-如果本机 `2455` 端口被占用，可以改成其他端口启动：
+如果 `2455` 被占用，可以改端口启动：
 
 ```bash
-./codex-lb --host 127.0.0.1 --port 2456
+codex-lb --host 127.0.0.1 --port 2456
 ```
 
-如果修改了端口，所有客户端地址也要同步改成新端口。
+升级时通常只需要重新安装新的 PKG，并保留：
 
-升级时，通常只需要替换分发目录中的程序文件，并保留：
+- `~/Library/Application Support/codex-lb/.env.local`
+- `~/Library/Application Support/codex-lb/` 下的数据
+- 或历史遗留的 `~/.codex-lb/` 数据目录
 
-- `.env.local`
-- `~/.codex-lb/` 下的数据
+## 常见问题
 
-## 常见问题与故障处理
-
+- 安装后执行 `codex-lb` 提示命令不存在
+  关闭当前 Terminal，重新打开一个新的窗口
+- 不知道配置文件在哪里
+  先运行 `codex-lb init`
 - 浏览器打不开 dashboard
-  先确认进程仍在运行，再访问 `/health` 检查服务是否正常
-- `2455` 端口已被占用
-  改用其他端口启动，并同步更新客户端配置
-- OAuth 登录回调没有完成
-  确认本机 `1455` 端口没有被其他程序占用
-- 更换机器或误删文件后数据库异常
-  仅在确认要“从头开始”时才删除 `~/.codex-lb/` 下的 SQLite 数据文件
-- 客户端连不上代理
-  确认客户端地址使用的是 `127.0.0.1`，并且端口与当前启动参数一致
+  先访问 `/health` 确认服务是否已启动
+- `2455` 端口被占用
+  换一个端口启动，并同步更新客户端地址
+- OAuth 回调没有完成
+  检查 `1455` 端口是否被其他程序占用
+- 以前的数据不见了
+  检查用户是否还在使用旧的 `~/.codex-lb/` 目录
 - 收到的是未签名内部构建
-  可能需要手动移除 quarantine 标记后才能运行
+  优先使用已签名并 notarized 的 PKG；如果只能用 tar.gz，可能需要手动移除 quarantine
 
 ## 维护者交付清单
 
-将分发包交给用户时，维护者最好同时明确告知：
+给用户发包时，建议同时明确说明：
 
-- 应使用 `arm64` 还是 `x86_64` 版本
-- 对应的 `.sha256` 校验文件
-- 当前构建是否已签名并 notarized
-- dashboard 登录凭据是否已预先配置
-- 是否默认启用了 API Key 校验
-- 用户最终应配置到客户端里的确切地址
+- 应使用 `arm64` 还是 `x86_64`
+- 是否已签名并 notarized
+- 安装后推荐先执行 `codex-lb init`
+- 推荐配置目录是 `~/Library/Application Support/codex-lb/`
+- 是否继续兼容旧的 `~/.codex-lb/`
+- dashboard 登录凭据是否已预置
+- 是否启用了 API Key 校验
+- 客户端应使用的本地地址
 
 ## Related Specs
 

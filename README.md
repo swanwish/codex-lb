@@ -76,10 +76,23 @@ If you need fresh frontend assets first:
 This produces:
 
 - `dist/codex-lb-macos-<arch>.tar.gz`
-- `dist/codex-lb-macos-<arch>.dmg`
+- `dist/codex-lb-macos-<arch>.pkg`
 - `dist/codex-lb-macos-<arch>.sha256`
 
-Recipients do not need a local Python installation. They can place `.env.local` next to the executable and run `./codex-lb`.
+The PKG installs:
+
+- the packaged runtime under `/Library/Application Support/codex-lb/`
+- a Terminal launcher at `/usr/local/bin/codex-lb`
+- the default user config/data directory under `~/Library/Application Support/codex-lb/` for fresh installs
+
+After installation, recipients can run:
+
+```bash
+codex-lb init
+codex-lb
+```
+
+`codex-lb init` creates a `.env.local` user override file in the macOS user data directory. Existing `~/.codex-lb/` installs remain supported during upgrades.
 
 Each build is architecture-specific:
 
@@ -96,7 +109,7 @@ How to use it:
 
 1. Open `Actions -> macOS Package -> Run workflow`
 2. Optionally set `git_ref` to the branch, tag, or commit you want to package
-3. Set `sign_artifacts=true` if you want codesigning
+3. Set `sign_artifacts=true` if you want executable + installer signing
 4. Set `notarize_artifacts=true` if you also want Apple notarization
 
 This workflow always uploads workflow artifacts for both architectures:
@@ -108,18 +121,21 @@ It does not publish to PyPI, GHCR, Helm, or GitHub Releases.
 
 ### Signed / Notarized macOS releases
 
-Both the full `Release` workflow and the macOS-only packaging workflow can optionally codesign the staged binary and DMG, submit the DMG for notarization, and staple the notarization ticket.
+Both the full `Release` workflow and the macOS-only packaging workflow can optionally codesign the staged executable, sign the generated PKG, submit the PKG for notarization, and staple the notarization ticket.
 
 To enable that path, configure these repository secrets:
 
 - `CODEX_LB_MACOS_SIGNING_CERTIFICATE_P12_BASE64`
 - `CODEX_LB_MACOS_SIGNING_CERTIFICATE_PASSWORD`
 - `CODEX_LB_MACOS_CODESIGN_IDENTITY`
+- `CODEX_LB_MACOS_INSTALLER_SIGNING_CERTIFICATE_P12_BASE64`
+- `CODEX_LB_MACOS_INSTALLER_SIGNING_CERTIFICATE_PASSWORD`
+- `CODEX_LB_MACOS_INSTALLER_SIGN_IDENTITY`
 - `CODEX_LB_MACOS_NOTARY_APPLE_ID`
 - `CODEX_LB_MACOS_NOTARY_TEAM_ID`
 - `CODEX_LB_MACOS_NOTARY_APP_PASSWORD`
 
-If those secrets are not present, the workflow still publishes unsigned macOS archives and DMGs. Unsigned binaries downloaded from the internet may require:
+If those secrets are not present, the workflow still publishes unsigned macOS archives and PKGs. Unsigned tarballs downloaded from the internet may require:
 
 ```bash
 xattr -dr com.apple.quarantine ./codex-lb
@@ -363,6 +379,7 @@ SQLite is the default database backend; PostgreSQL is optional via `CODEX_LB_DAT
 
 | Environment | Path |
 |-------------|------|
+| macOS PKG (fresh installs) | `~/Library/Application Support/codex-lb/` |
 | Local / uvx | `~/.codex-lb/` |
 | Docker | `/var/lib/codex-lb/` |
 

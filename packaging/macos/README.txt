@@ -1,28 +1,33 @@
 codex-lb macOS package
 
-This package contains:
-- codex-lb: standalone executable for this macOS architecture
-- .env.example: sample configuration file
+Installed paths:
+- launcher command: /usr/local/bin/codex-lb
+- packaged runtime: /Library/Application Support/codex-lb/
+- user data and overrides (fresh installs): ~/Library/Application Support/codex-lb/
+- legacy user data (upgrades): ~/.codex-lb/
 
-Before you start:
-- Use the arm64 build on Apple Silicon Macs
-- Use the x86_64 build on Intel Macs
-- You do not need Python, uv, Bun, or the source repository
-
-Quick start:
-1. Copy this package to a writable local directory, for example ~/Applications/codex-lb/
-2. Optional: copy .env.example to .env.local
+After installation:
+1. Open a new Terminal window
+2. Optionally run:
+   codex-lb init
 3. Run:
-   ./codex-lb --host 127.0.0.1 --port 2455
+   codex-lb
 4. Open:
    http://127.0.0.1:2455
 
 Configuration:
-- The executable reads .env and .env.local from the same directory
-- Default database: ~/.codex-lb/store.db
-- Default local service port: 2455
-- Default OAuth callback port: 1455
-- Do not change the OAuth callback port unless your maintainer told you to
+- Fresh PKG installs read user overrides from:
+  ~/Library/Application Support/codex-lb/.env
+  ~/Library/Application Support/codex-lb/.env.local
+- Existing ~/.codex-lb installs remain supported during upgrades
+- The macOS example config is installed at:
+  /Library/Application Support/codex-lb/.env.example
+- To create a local override file automatically:
+  codex-lb init
+- Or manually:
+  mkdir -p ~/Library/Application\ Support/codex-lb
+  cp "/Library/Application Support/codex-lb/.env.example" \
+    ~/Library/Application\ Support/codex-lb/.env.local
 
 Client endpoints:
 - Codex CLI:
@@ -31,8 +36,11 @@ Client endpoints:
   http://127.0.0.1:2455/v1
 
 Notes:
-- Prefer the DMG if you want the signed and notarized distribution artifact
-- Unsigned archives downloaded from the internet may require:
-  xattr -dr com.apple.quarantine ./codex-lb
+- Use the arm64 build on Apple Silicon Macs
+- Use the x86_64 build on Intel Macs
+- Default database path for fresh PKG installs:
+  ~/Library/Application Support/codex-lb/store.db
+- Default OAuth callback port:
+  1455
 - Health check:
   http://127.0.0.1:2455/health
