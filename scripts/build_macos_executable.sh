@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="codex-lb"
 ARCHIVE_PREFIX="${APP_NAME}-macos"
+PACKAGE_IDENTIFIER="io.github.codex-lb"
+INSTALL_ROOT="/Library/Application Support/${APP_NAME}"
+INSTALL_BIN="/usr/local/bin/${APP_NAME}"
 REBUILD_FRONTEND="false"
 SKIP_FRONTEND="false"
 SIGN_ARTIFACTS="false"
@@ -18,8 +21,17 @@ Build a self-contained macOS executable with PyInstaller and stage release artif
 Options:
   --rebuild-frontend  Rebuild app/static before packaging.
   --skip-frontend     Skip frontend build and require app/static to already exist.
-  --sign              Codesign the staged executable and generated DMG using CODEX_LB_MACOS_CODESIGN_IDENTITY.
-  --notarize          Submit the DMG with notarytool and staple the result (implies --sign).
+  --sign              Codesign the staged executable and sign the generated PKG.
+  --notarize          Submit the PKG with notarytool and staple the result (implies --sign).
+
+Required env vars for --sign:
+  CODEX_LB_MACOS_CODESIGN_IDENTITY
+  CODEX_LB_MACOS_INSTALLER_SIGN_IDENTITY
+
+Required env vars for --notarize:
+  CODEX_LB_MACOS_NOTARY_APPLE_ID
+  CODEX_LB_MACOS_NOTARY_TEAM_ID
+  CODEX_LB_MACOS_NOTARY_APP_PASSWORD
 EOF
 }
 
@@ -106,6 +118,16 @@ build_frontend() {
   popd >/dev/null
 }
 
+project_version() {
+  python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+print(data["project"]["version"])
+PY
+}
+
 codesign_executable() {
   local path="$1"
 
@@ -121,52 +143,49 @@ codesign_executable() {
   codesign --verify --strict --verbose=2 "${path}"
 }
 
-codesign_dmg() {
-  local path="$1"
+create_pkg() {
+  local pkg_root="$1"
+  local pkg_path="$2"
+  local version="$3"
+  local -a args=(
+    --root "${pkg_root}"
+    --identifier "${PACKAGE_IDENTIFIER}"
+    --version "${version}"
+    --install-location /
+  )
 
-  require_env_var CODEX_LB_MACOS_CODESIGN_IDENTITY
+  if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
+    require_env_var CODEX_LB_MACOS_INSTALLER_SIGN_IDENTITY
+    args+=(--sign "${CODEX_LB_MACOS_INSTALLER_SIGN_IDENTITY}")
+  fi
 
-  echo "Codesigning disk image ${path}..."
-  codesign \
-    --force \
-    --timestamp \
-    --sign "${CODEX_LB_MACOS_CODESIGN_IDENTITY}" \
-    "${path}"
-  codesign --verify --verbose=2 "${path}"
+  args+=("${pkg_path}")
+
+  echo "Creating PKG ${pkg_path}..."
+  pkgbuild "${args[@]}" >/dev/null
+
+  if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
+    pkgutil --check-signature "${pkg_path}"
+  fi
 }
 
-create_dmg() {
-  local source_dir="$1"
-  local dmg_path="$2"
-  local volume_name="$3"
-
-  echo "Creating DMG ${dmg_path}..."
-  hdiutil create \
-    -volname "${volume_name}" \
-    -srcfolder "${source_dir}" \
-    -ov \
-    -format UDZO \
-    "${dmg_path}" \
-    >/dev/null
-}
-
-notarize_dmg() {
-  local dmg_path="$1"
+notarize_pkg() {
+  local pkg_path="$1"
 
   require_env_var CODEX_LB_MACOS_NOTARY_APPLE_ID
   require_env_var CODEX_LB_MACOS_NOTARY_TEAM_ID
   require_env_var CODEX_LB_MACOS_NOTARY_APP_PASSWORD
 
-  echo "Submitting ${dmg_path} for notarization..."
-  xcrun notarytool submit "${dmg_path}" \
+  echo "Submitting ${pkg_path} for notarization..."
+  xcrun notarytool submit "${pkg_path}" \
     --apple-id "${CODEX_LB_MACOS_NOTARY_APPLE_ID}" \
     --team-id "${CODEX_LB_MACOS_NOTARY_TEAM_ID}" \
     --password "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD}" \
     --wait
 
-  echo "Stapling notarization ticket to ${dmg_path}..."
-  xcrun stapler staple "${dmg_path}"
-  xcrun stapler validate "${dmg_path}"
+  echo "Stapling notarization ticket to ${pkg_path}..."
+  xcrun stapler staple "${pkg_path}"
+  xcrun stapler validate "${pkg_path}"
 }
 
 STATIC_INDEX="${ROOT_DIR}/app/static/index.html"
@@ -183,15 +202,20 @@ fi
 
 ARCH="$(uname -m)"
 PLATFORM_ID="macos-${ARCH}"
+VERSION="$(cd "${ROOT_DIR}" && project_version)"
+WRAPPER_TEMPLATE="${ROOT_DIR}/packaging/macos/bin/${APP_NAME}"
+ENV_TEMPLATE="${ROOT_DIR}/packaging/macos/.env.example"
 PYI_DIST_DIR="${ROOT_DIR}/dist/pyinstaller/${PLATFORM_ID}"
 PYI_WORK_DIR="${ROOT_DIR}/build/pyinstaller/${PLATFORM_ID}"
+PKG_ROOT="${ROOT_DIR}/build/pkgroot/${PLATFORM_ID}"
 RELEASE_DIR="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}"
 ARCHIVE_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.tar.gz"
-DMG_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.dmg"
+PKG_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.pkg"
 CHECKSUM_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.sha256"
+LEGACY_DMG_PATH="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}.dmg"
 
-rm -rf "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${DMG_PATH}" "${CHECKSUM_PATH}"
-mkdir -p "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${RELEASE_DIR}"
+rm -rf "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${PKG_ROOT}" "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${PKG_PATH}" "${CHECKSUM_PATH}" "${LEGACY_DMG_PATH}"
+mkdir -p "${PYI_DIST_DIR}" "${PYI_WORK_DIR}" "${PKG_ROOT}${INSTALL_ROOT}" "${PKG_ROOT}/usr/local/bin" "${RELEASE_DIR}"
 
 echo "Packaging ${APP_NAME} for ${PLATFORM_ID}..."
 pushd "${ROOT_DIR}" >/dev/null
@@ -214,7 +238,7 @@ if [[ ! -x "${BINARY_PATH}" ]]; then
 fi
 
 cp "${BINARY_PATH}" "${RELEASE_DIR}/${APP_NAME}"
-cp "${ROOT_DIR}/.env.example" "${RELEASE_DIR}/.env.example"
+cp "${ENV_TEMPLATE}" "${RELEASE_DIR}/.env.example"
 cp "${ROOT_DIR}/packaging/macos/README.txt" "${RELEASE_DIR}/README.txt"
 chmod +x "${RELEASE_DIR}/${APP_NAME}"
 
@@ -222,24 +246,25 @@ if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
   codesign_executable "${RELEASE_DIR}/${APP_NAME}"
 fi
 
-tar -C "${ROOT_DIR}/dist" -czf "${ARCHIVE_PATH}" "$(basename "${RELEASE_DIR}")"
-create_dmg "${RELEASE_DIR}" "${DMG_PATH}" "${APP_NAME}-${ARCH}"
+cp "${RELEASE_DIR}/${APP_NAME}" "${PKG_ROOT}${INSTALL_ROOT}/${APP_NAME}"
+cp "${ENV_TEMPLATE}" "${PKG_ROOT}${INSTALL_ROOT}/.env.example"
+cp "${ROOT_DIR}/packaging/macos/README.txt" "${PKG_ROOT}${INSTALL_ROOT}/README.txt"
+install -m 755 "${WRAPPER_TEMPLATE}" "${PKG_ROOT}${INSTALL_BIN}"
 
-if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
-  codesign_dmg "${DMG_PATH}"
-fi
+tar -C "${ROOT_DIR}/dist" -czf "${ARCHIVE_PATH}" "$(basename "${RELEASE_DIR}")"
+create_pkg "${PKG_ROOT}" "${PKG_PATH}" "${VERSION}"
 
 if [[ "${NOTARIZE_ARTIFACTS}" == "true" ]]; then
-  notarize_dmg "${DMG_PATH}"
+  notarize_pkg "${PKG_PATH}"
 fi
 
 pushd "${ROOT_DIR}/dist" >/dev/null
-shasum -a 256 "$(basename "${ARCHIVE_PATH}")" "$(basename "${DMG_PATH}")" > "$(basename "${CHECKSUM_PATH}")"
+shasum -a 256 "$(basename "${ARCHIVE_PATH}")" "$(basename "${PKG_PATH}")" > "$(basename "${CHECKSUM_PATH}")"
 popd >/dev/null
 
 echo
 echo "Build complete:"
 echo "  Binary:  ${RELEASE_DIR}/${APP_NAME}"
 echo "  Archive: ${ARCHIVE_PATH}"
-echo "  DMG:     ${DMG_PATH}"
+echo "  PKG:     ${PKG_PATH}"
 echo "  SHA256:  ${CHECKSUM_PATH}"

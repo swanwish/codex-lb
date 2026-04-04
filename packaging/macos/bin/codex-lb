@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+APP_ROOT="/Library/Application Support/codex-lb"
+
+exec "${APP_ROOT}/codex-lb" "$@"

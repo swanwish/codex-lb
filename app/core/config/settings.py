@@ -32,7 +32,13 @@ def _in_container() -> bool:
 def _default_home_dir() -> Path:
     if _in_container():
         return DOCKER_DATA_DIR
-    return Path.home() / ".codex-lb"
+    legacy_home_dir = Path.home() / ".codex-lb"
+    if getattr(sys, "frozen", False) and sys.platform == "darwin":
+        macos_home_dir = Path.home() / "Library" / "Application Support" / "codex-lb"
+        if legacy_home_dir.exists() and not macos_home_dir.exists():
+            return legacy_home_dir
+        return macos_home_dir
+    return legacy_home_dir
 
 
 def _default_oauth_callback_host() -> str:
@@ -51,10 +57,41 @@ DEFAULT_DB_PATH = DEFAULT_HOME_DIR / "store.db"
 DEFAULT_ENCRYPTION_KEY_FILE = DEFAULT_HOME_DIR / "encryption.key"
 
 
+def _legacy_home_dir() -> Path:
+    return Path.home() / ".codex-lb"
+
+
+def _user_env_dirs() -> tuple[Path, ...]:
+    if _in_container():
+        return (DOCKER_DATA_DIR,)
+
+    legacy_home_dir = _legacy_home_dir()
+    if getattr(sys, "frozen", False) and sys.platform == "darwin":
+        macos_home_dir = Path.home() / "Library" / "Application Support" / "codex-lb"
+        if legacy_home_dir == macos_home_dir:
+            return (macos_home_dir,)
+        return (legacy_home_dir, macos_home_dir)
+
+    return (legacy_home_dir,)
+
+
+def _env_files() -> tuple[Path, ...]:
+    env_files: list[Path] = [BASE_DIR / ".env", BASE_DIR / ".env.local"]
+    if getattr(sys, "frozen", False):
+        # Installed macOS packages keep the binary in a system directory that
+        # should remain read-only for normal users. Read user overrides from the
+        # user data directory so `codex-lb` can be launched directly from
+        # Terminal after installation, while still honoring the legacy
+        # ~/.codex-lb layout during upgrades.
+        for env_dir in _user_env_dirs():
+            env_files.extend([env_dir / ".env", env_dir / ".env.local"])
+    return tuple(env_files)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="CODEX_LB_",
-        env_file=(BASE_DIR / ".env", BASE_DIR / ".env.local"),
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
