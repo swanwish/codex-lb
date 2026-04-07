@@ -177,11 +177,22 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 5
     circuit_breaker_recovery_timeout_seconds: int = 60
 
+    # Soft drain & deterministic failover
+    soft_drain_enabled: bool = True
+    deterministic_failover_enabled: bool = True
+    drain_primary_threshold_pct: float = 85.0
+    drain_secondary_threshold_pct: float = 90.0
+    drain_error_window_seconds: float = 60.0
+    drain_error_count_threshold: int = 2
+    probe_quiet_seconds: float = 60.0
+    probe_success_streak_required: int = 3
+
     # Backpressure
     backpressure_max_concurrent_requests: int = 0  # 0 = unlimited
 
     bulkhead_proxy_limit: int = 200
     bulkhead_dashboard_limit: int = 50
+    dashboard_bootstrap_token: str | None = None
 
     memory_warning_threshold_mb: int = 0
     memory_reject_threshold_mb: int = 0
