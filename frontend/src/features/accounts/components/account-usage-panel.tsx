@@ -11,6 +11,7 @@ import {
   formatQuotaResetLabel,
   formatResetRelative,
   formatWindowLabel,
+  formatAbsoluteResetTime,
 } from "@/utils/formatters";
 
 export type AccountUsagePanelProps = {
@@ -56,7 +57,7 @@ function QuotaRow({
       </div>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Clock className="h-3 w-3 shrink-0" />
-        <span>Reset {formatQuotaResetLabel(resetAt ?? null)}</span>
+        <span>Reset: {formatQuotaResetLabel(resetAt ?? null)}</span>
       </div>
     </div>
   );
@@ -81,7 +82,9 @@ function formatResetCountdown(resetAt: number | null): string | null {
   if (resetAt === null) return null;
   const diffMs = resetAt * 1000 - Date.now();
   if (diffMs <= 0) return "Resetting...";
-  return `Resets ${formatResetRelative(diffMs)}`;
+  const relative = formatResetRelative(diffMs);
+  const absolute = formatAbsoluteResetTime(new Date(resetAt * 1000));
+  return `Resets: ${absolute} (${relative})`;
 }
 
 function AdditionalQuotaRow({

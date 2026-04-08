@@ -229,6 +229,34 @@ export function formatCountdown(seconds: number): string {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
+function isToday(date: Date): boolean {
+  const today = new Date();
+  return (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  );
+}
+
+const resetDateFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const resetTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+export function formatAbsoluteResetTime(date: Date): string {
+  if (isToday(date)) {
+    return `Today, ${resetTimeFormatter.format(date)}`;
+  }
+  return resetDateFormatter.format(date);
+}
+
 export function formatQuotaResetLabel(resetAt: string | null | undefined): string {
   const date = parseDate(resetAt);
   if (!date || date.getTime() <= 0) {
@@ -238,7 +266,9 @@ export function formatQuotaResetLabel(resetAt: string | null | undefined): strin
   if (diffMs <= 0) {
     return "now";
   }
-  return formatResetRelative(diffMs);
+  const relative = formatResetRelative(diffMs);
+  const absolute = formatAbsoluteResetTime(date);
+  return `${absolute} (${relative})`;
 }
 
 export function formatQuotaResetMeta(
