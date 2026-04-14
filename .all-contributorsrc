@@ -205,7 +205,8 @@
         "code",
         "bug",
         "question",
-        "maintenance"
+        "maintenance",
+        "test"
       ]
     },
     {
@@ -304,6 +305,35 @@
       "name": "embogomolov",
       "avatar_url": "https://avatars.githubusercontent.com/u/185256086?v=4",
       "profile": "https://github.com/embogomolov",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "SHAREN",
+      "name": "Renat Sharipov",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6128858?v=4",
+      "profile": "https://github.com/SHAREN",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "aruis",
+      "name": "Liu Rui",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1785495?v=4",
+      "profile": "https://ximatai.net",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "OverHash",
+      "name": "OverHash",
+      "avatar_url": "https://avatars.githubusercontent.com/u/46231745?v=4",
+      "profile": "https://github.com/OverHash",
       "contributions": [
         "code",
         "test"

@@ -63,6 +63,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     if bool(args.ssl_certfile) ^ bool(args.ssl_keyfile):
         raise SystemExit("Both --ssl-certfile and --ssl-keyfile must be provided together.")
 
+    os.environ["PORT"] = str(args.port)
+
     uvicorn.run(
         "app.main:app",
         host=args.host,
