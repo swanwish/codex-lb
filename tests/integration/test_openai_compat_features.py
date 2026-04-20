@@ -134,7 +134,6 @@ async def test_v1_responses_accepts_previous_response_id(async_client, monkeypat
             "display_height": 768,
             "environment": "browser",
         },
-        {"type": "image_generation"},
     ],
 )
 async def test_v1_responses_rejects_builtin_tools(async_client, tool_payload):
@@ -350,6 +349,28 @@ async def test_v1_responses_allows_web_search(async_client, monkeypatch, tool_ty
 
 
 @pytest.mark.asyncio
+async def test_v1_responses_allows_image_generation(async_client, monkeypatch):
+    await _import_account(async_client, "acc_image_generation", "image-generation@example.com")
+
+    seen = {}
+
+    async def fake_stream(payload, headers, access_token, account_id, base_url=None, raise_for_status=False):
+        seen["payload"] = payload
+        yield _completed_event("resp_image_generation")
+
+    monkeypatch.setattr(proxy_module, "core_stream_responses", fake_stream)
+
+    request_payload = {
+        "model": "gpt-5.2",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "Draw a red dot."}]}],
+        "tools": [{"type": "image_generation", "output_format": "png"}],
+    }
+    resp = await async_client.post("/v1/responses", json=request_payload)
+    assert resp.status_code == 200
+    assert seen["payload"].tools == [{"type": "image_generation", "output_format": "png"}]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_type", ["web_search", "web_search_preview"])
 async def test_backend_responses_allows_web_search(async_client, monkeypatch, tool_type):
     await _import_account(async_client, "acc_backend_web_search", "backend-web-search@example.com")
@@ -371,6 +392,29 @@ async def test_backend_responses_allows_web_search(async_client, monkeypatch, to
     resp = await async_client.post("/backend-api/codex/responses", json=request_payload)
     assert resp.status_code == 200
     assert seen["payload"].tools == [{"type": "web_search"}]
+
+
+@pytest.mark.asyncio
+async def test_backend_responses_allows_image_generation(async_client, monkeypatch):
+    await _import_account(async_client, "acc_backend_image_generation", "backend-image-generation@example.com")
+
+    seen = {}
+
+    async def fake_stream(payload, headers, access_token, account_id, base_url=None, raise_for_status=False):
+        seen["payload"] = payload
+        yield _completed_event("resp_backend_image_generation")
+
+    monkeypatch.setattr(proxy_module, "core_stream_responses", fake_stream)
+
+    request_payload = {
+        "model": "gpt-5.2",
+        "instructions": "",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "Draw a red dot."}]}],
+        "tools": [{"type": "image_generation", "output_format": "png"}],
+    }
+    resp = await async_client.post("/backend-api/codex/responses", json=request_payload)
+    assert resp.status_code == 200
+    assert seen["payload"].tools == [{"type": "image_generation", "output_format": "png"}]
 
 
 @pytest.mark.asyncio

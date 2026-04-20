@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.openai.exceptions import ClientPayloadError
+from app.core.openai.chat_requests import ChatCompletionsRequest
 from app.core.openai.requests import ResponsesCompactRequest, ResponsesRequest
 from app.core.openai.v1_requests import V1ResponsesCompactRequest, V1ResponsesRequest
 from app.core.types import JsonValue
@@ -352,22 +353,26 @@ def test_responses_accepts_string_input():
 
 
 @pytest.mark.parametrize(
-    ("tool_type", "expected"),
+    ("tool_payload", "expected"),
     [
-        ("web_search", "web_search"),
-        ("web_search_preview", "web_search"),
+        ({"type": "web_search"}, [{"type": "web_search"}]),
+        ({"type": "web_search_preview"}, [{"type": "web_search"}]),
+        (
+            {"type": "image_generation", "output_format": "png"},
+            [{"type": "image_generation", "output_format": "png"}],
+        ),
     ],
 )
-def test_responses_accepts_builtin_tools(tool_type, expected):
+def test_responses_accepts_builtin_tools(tool_payload, expected):
     payload = {
         "model": "gpt-5.1",
         "instructions": "hi",
         "input": [],
-        "tools": [{"type": tool_type}],
+        "tools": [tool_payload],
     }
     request = ResponsesRequest.model_validate(payload)
 
-    assert request.tools == [{"type": expected}]
+    assert request.tools == expected
 
 
 @pytest.mark.parametrize("tool_choice", [{"type": "web_search"}, {"type": "web_search_preview"}])
@@ -484,10 +489,32 @@ def test_v1_input_string_passthrough():
     assert request.input == [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
 
 
-def test_v1_rejects_builtin_tools():
-    payload = {"model": "gpt-5.1", "input": [], "tools": [{"type": "image_generation"}]}
+def test_v1_accepts_image_generation_tools():
+    payload = {
+        "model": "gpt-5.1",
+        "input": [],
+        "tools": [{"type": "image_generation", "output_format": "png"}],
+    }
+    request = V1ResponsesRequest.model_validate(payload)
+
+    assert request.tools == [{"type": "image_generation", "output_format": "png"}]
+
+
+def test_v1_rejects_still_unsupported_builtin_tools():
+    payload = {"model": "gpt-5.1", "input": [], "tools": [{"type": "code_interpreter"}]}
     with pytest.raises(ValidationError, match="Unsupported tool type"):
         V1ResponsesRequest.model_validate(payload)
+
+
+def test_chat_completions_still_rejects_image_generation_tools():
+    payload = {
+        "model": "gpt-5.1",
+        "messages": [{"role": "user", "content": "draw a circle"}],
+        "tools": [{"type": "image_generation", "output_format": "png"}],
+    }
+
+    with pytest.raises(ValidationError, match="Unsupported tool type"):
+        ChatCompletionsRequest.model_validate(payload)
 
 
 def test_v1_compact_messages_convert():
