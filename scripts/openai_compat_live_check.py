@@ -58,8 +58,6 @@ EXPECTED_UNSUPPORTED = [
     "T.file_search",
     "T.code_interpreter",
     "T.computer_use",
-    "T.image_generation",
-    "T.tool_choice_required",
     "C.audio_input",
     "C.file_input_id",
 ]

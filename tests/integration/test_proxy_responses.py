@@ -532,8 +532,18 @@ async def test_proxy_responses_forces_stream(async_client, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_type", ["web_search", "web_search_preview"])
-async def test_proxy_responses_accepts_builtin_tools(async_client, monkeypatch, tool_type):
+@pytest.mark.parametrize(
+    ("tool_payload", "expected_tools"),
+    [
+        ({"type": "web_search"}, [{"type": "web_search"}]),
+        ({"type": "web_search_preview"}, [{"type": "web_search"}]),
+        (
+            {"type": "image_generation", "output_format": "png"},
+            [{"type": "image_generation", "output_format": "png"}],
+        ),
+    ],
+)
+async def test_proxy_responses_accepts_builtin_tools(async_client, monkeypatch, tool_payload, expected_tools):
     email = "tools@example.com"
     raw_account_id = "acc_tools"
     auth_json = _make_auth_json(raw_account_id, email)
@@ -553,7 +563,7 @@ async def test_proxy_responses_accepts_builtin_tools(async_client, monkeypatch, 
         "model": "gpt-5.1",
         "instructions": "hi",
         "input": [],
-        "tools": [{"type": tool_type}],
+        "tools": [tool_payload],
         "stream": True,
     }
     async with async_client.stream(
@@ -566,7 +576,7 @@ async def test_proxy_responses_accepts_builtin_tools(async_client, monkeypatch, 
 
     event = _extract_first_event(lines)
     assert event["type"] == "response.completed"
-    assert getattr(seen.get("payload"), "tools", None) == [{"type": "web_search"}]
+    assert getattr(seen.get("payload"), "tools", None) == expected_tools
 
 
 @pytest.mark.asyncio

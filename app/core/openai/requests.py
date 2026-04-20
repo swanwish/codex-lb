@@ -21,11 +21,14 @@ _RESPONSES_INCLUDE_ALLOWLIST = {
     "web_search_call.action.sources",
 }
 
-UNSUPPORTED_TOOL_TYPES = {
+_UNSUPPORTED_TOOL_TYPES = {
     "file_search",
     "code_interpreter",
     "computer_use",
     "computer_use_preview",
+}
+
+_RESPONSES_ONLY_TOOL_TYPES = {
     "image_generation",
 }
 
@@ -69,7 +72,7 @@ def normalize_tool_choice(choice: JsonValue | None) -> JsonValue | None:
     return choice
 
 
-def validate_tool_types(tools: list[JsonValue]) -> list[JsonValue]:
+def validate_tool_types(tools: list[JsonValue], *, allow_image_generation: bool = False) -> list[JsonValue]:
     normalized_tools: list[JsonValue] = []
     for tool in tools:
         if not is_json_mapping(tool):
@@ -83,7 +86,9 @@ def validate_tool_types(tools: list[JsonValue]) -> list[JsonValue]:
                 tool = dict(tool_mapping)
                 tool["type"] = normalized_type
                 tool_type = normalized_type
-            if tool_type in UNSUPPORTED_TOOL_TYPES:
+            if tool_type in _UNSUPPORTED_TOOL_TYPES or (
+                tool_type in _RESPONSES_ONLY_TOOL_TYPES and not allow_image_generation
+            ):
                 raise ValueError(f"Unsupported tool type: {tool_type}")
         normalized_tools.append(tool)
     return normalized_tools
@@ -379,7 +384,7 @@ class ResponsesRequest(BaseModel):
     @field_validator("tools")
     @classmethod
     def _validate_tools(cls, value: list[JsonValue]) -> list[JsonValue]:
-        return validate_tool_types(value)
+        return validate_tool_types(value, allow_image_generation=True)
 
     @field_validator("tool_choice")
     @classmethod

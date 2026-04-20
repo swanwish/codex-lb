@@ -4031,7 +4031,10 @@ async def test_prepare_websocket_response_create_request_normalizes_payload_and_
             "input": "hello",
             "promptCacheKey": "thread_123",
             "promptCacheRetention": "12h",
-            "tools": [{"type": "web_search_preview"}],
+            "tools": [
+                {"type": "web_search_preview"},
+                {"type": "image_generation", "output_format": "png"},
+            ],
             "service_tier": "priority",
             "reasoning": {"effort": "low"},
         },
@@ -4059,7 +4062,10 @@ async def test_prepare_websocket_response_create_request_normalizes_payload_and_
     assert "promptCacheKey" not in normalized_payload
     assert "promptCacheRetention" not in normalized_payload
     assert "prompt_cache_retention" not in normalized_payload
-    assert normalized_payload["tools"] == [{"type": "web_search"}]
+    assert normalized_payload["tools"] == [
+        {"type": "web_search"},
+        {"type": "image_generation", "output_format": "png"},
+    ]
     assert normalized_payload["model"] == "gpt-5.2"
     assert normalized_payload["reasoning"] == {"effort": "high"}
     assert normalized_payload["service_tier"] == "priority"
