@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.openai.exceptions import ClientPayloadError
-from app.core.openai.chat_requests import ChatCompletionsRequest
 from app.core.openai.requests import ResponsesCompactRequest, ResponsesRequest
 from app.core.openai.v1_requests import V1ResponsesCompactRequest, V1ResponsesRequest
 from app.core.types import JsonValue
@@ -22,10 +21,10 @@ def test_responses_requires_input():
         ResponsesRequest.model_validate({"model": "gpt-5.1", "instructions": "hi"})
 
 
-def test_store_true_is_rejected():
+def test_store_true_is_coerced_to_false():
     payload = {"model": "gpt-5.1", "instructions": "hi", "input": [], "store": True}
-    with pytest.raises(ValueError, match="store must be false"):
-        ResponsesRequest.model_validate(payload)
+    request = ResponsesRequest.model_validate(payload)
+    assert request.store is False
 
 
 def test_store_omitted_defaults_to_false():
@@ -43,10 +42,10 @@ def test_store_false_is_preserved():
     assert request.to_payload()["store"] is False
 
 
-def test_compact_store_true_is_rejected():
+def test_compact_store_true_is_coerced_to_false():
     payload = {"model": "gpt-5.1", "instructions": "hi", "input": [], "store": True}
-    with pytest.raises(ValueError, match="store must be false"):
-        ResponsesCompactRequest.model_validate(payload)
+    request = ResponsesCompactRequest.model_validate(payload)
+    assert request.store is False
 
 
 def test_compact_store_omitted_defaults_to_false():
@@ -353,17 +352,40 @@ def test_responses_accepts_string_input():
 
 
 @pytest.mark.parametrize(
-    ("tool_payload", "expected"),
+    ("tool_type", "expected"),
     [
-        ({"type": "web_search"}, [{"type": "web_search"}]),
-        ({"type": "web_search_preview"}, [{"type": "web_search"}]),
-        (
-            {"type": "image_generation", "output_format": "png"},
-            [{"type": "image_generation", "output_format": "png"}],
-        ),
+        ("web_search", "web_search"),
+        ("web_search_preview", "web_search"),
     ],
 )
-def test_responses_accepts_builtin_tools(tool_payload, expected):
+def test_responses_accepts_builtin_tools(tool_type, expected):
+    payload = {
+        "model": "gpt-5.1",
+        "instructions": "hi",
+        "input": [],
+        "tools": [{"type": tool_type}],
+    }
+    request = ResponsesRequest.model_validate(payload)
+
+    assert request.tools == [{"type": expected}]
+
+
+@pytest.mark.parametrize(
+    "tool_payload",
+    [
+        {"type": "image_generation"},
+        {
+            "type": "computer_use_preview",
+            "display_width": 1024,
+            "display_height": 768,
+            "environment": "browser",
+        },
+        {"type": "computer_use", "display_width": 1024, "display_height": 768, "environment": "browser"},
+        {"type": "file_search", "vector_store_ids": ["vs_dummy"]},
+        {"type": "code_interpreter", "container": {"type": "auto"}},
+    ],
+)
+def test_responses_accepts_builtin_tool_passthrough(tool_payload):
     payload = {
         "model": "gpt-5.1",
         "instructions": "hi",
@@ -372,7 +394,7 @@ def test_responses_accepts_builtin_tools(tool_payload, expected):
     }
     request = ResponsesRequest.model_validate(payload)
 
-    assert request.tools == expected
+    assert request.tools == [tool_payload]
 
 
 @pytest.mark.parametrize("tool_choice", [{"type": "web_search"}, {"type": "web_search_preview"}])
@@ -489,32 +511,59 @@ def test_v1_input_string_passthrough():
     assert request.input == [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
 
 
-def test_v1_accepts_image_generation_tools():
+@pytest.mark.parametrize(
+    "tool_payload",
+    [
+        {"type": "image_generation"},
+        {
+            "type": "computer_use_preview",
+            "display_width": 1024,
+            "display_height": 768,
+            "environment": "browser",
+        },
+        {"type": "computer_use", "display_width": 1024, "display_height": 768, "environment": "browser"},
+        {"type": "file_search", "vector_store_ids": ["vs_dummy"]},
+        {"type": "code_interpreter", "container": {"type": "auto"}},
+    ],
+)
+def test_v1_responses_accepts_builtin_tools(tool_payload):
+    payload = {"model": "gpt-5.1", "input": [], "tools": [tool_payload]}
+    request = V1ResponsesRequest.model_validate(payload).to_responses_request()
+
+    assert request.tools == [tool_payload]
+
+
+def test_compact_strips_tool_fields():
     payload = {
         "model": "gpt-5.1",
+        "instructions": "hi",
         "input": [],
-        "tools": [{"type": "image_generation", "output_format": "png"}],
+        "tools": [{"type": "image_generation"}],
+        "tool_choice": {"type": "image_generation"},
+        "parallel_tool_calls": True,
     }
-    request = V1ResponsesRequest.model_validate(payload)
+    request = ResponsesCompactRequest.model_validate(payload)
 
-    assert request.tools == [{"type": "image_generation", "output_format": "png"}]
-
-
-def test_v1_rejects_still_unsupported_builtin_tools():
-    payload = {"model": "gpt-5.1", "input": [], "tools": [{"type": "code_interpreter"}]}
-    with pytest.raises(ValidationError, match="Unsupported tool type"):
-        V1ResponsesRequest.model_validate(payload)
+    dumped = request.to_payload()
+    assert "tools" not in dumped
+    assert "tool_choice" not in dumped
+    assert "parallel_tool_calls" not in dumped
 
 
-def test_chat_completions_still_rejects_image_generation_tools():
+def test_v1_compact_strips_tool_fields():
     payload = {
         "model": "gpt-5.1",
-        "messages": [{"role": "user", "content": "draw a circle"}],
-        "tools": [{"type": "image_generation", "output_format": "png"}],
+        "input": "hello",
+        "tools": [{"type": "image_generation"}],
+        "tool_choice": {"type": "image_generation"},
+        "parallel_tool_calls": True,
     }
+    request = V1ResponsesCompactRequest.model_validate(payload).to_compact_request()
 
-    with pytest.raises(ValidationError, match="Unsupported tool type"):
-        ChatCompletionsRequest.model_validate(payload)
+    dumped = request.to_payload()
+    assert "tools" not in dumped
+    assert "tool_choice" not in dumped
+    assert "parallel_tool_calls" not in dumped
 
 
 def test_v1_compact_messages_convert():
@@ -556,11 +605,11 @@ def test_v1_compact_store_omitted_defaults_to_false():
     assert "store" not in request.to_payload()
 
 
-def test_v1_compact_store_true_is_rejected():
+def test_v1_compact_store_true_is_coerced_to_false():
     payload = {"model": "gpt-5.1", "input": "hello", "store": True}
-
-    with pytest.raises(ValidationError, match="store must be false"):
-        V1ResponsesCompactRequest.model_validate(payload).to_compact_request()
+    request = V1ResponsesCompactRequest.model_validate(payload)
+    compact = request.to_compact_request()
+    assert compact.store is False
 
 
 def test_responses_normalizes_assistant_input_text_to_output_text():

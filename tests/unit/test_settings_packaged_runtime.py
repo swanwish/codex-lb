@@ -14,10 +14,13 @@ def test_packaged_runtime_reads_env_file_from_executable_directory(tmp_path) -> 
     executable_dir = tmp_path / "release"
     executable_dir.mkdir()
     (executable_dir / ".env.local").write_text("CODEX_LB_LOG_FORMAT=json\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         monkeypatch.setattr(sys, "executable", str(executable_dir / "codex-lb"), raising=False)
+        monkeypatch.setattr("pathlib.Path.home", lambda: home_dir)
         monkeypatch.delenv("CODEX_LB_LOG_FORMAT", raising=False)
 
         reloaded = importlib.reload(settings_module)
