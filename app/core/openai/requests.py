@@ -21,14 +21,11 @@ _RESPONSES_INCLUDE_ALLOWLIST = {
     "web_search_call.action.sources",
 }
 
-_UNSUPPORTED_TOOL_TYPES = {
+UNSUPPORTED_TOOL_TYPES = {
     "file_search",
     "code_interpreter",
     "computer_use",
     "computer_use_preview",
-}
-
-_RESPONSES_ONLY_TOOL_TYPES = {
     "image_generation",
 }
 
@@ -72,7 +69,7 @@ def normalize_tool_choice(choice: JsonValue | None) -> JsonValue | None:
     return choice
 
 
-def validate_tool_types(tools: list[JsonValue], *, allow_image_generation: bool = False) -> list[JsonValue]:
+def validate_tool_types(tools: list[JsonValue], *, allow_builtin_tools: bool = False) -> list[JsonValue]:
     normalized_tools: list[JsonValue] = []
     for tool in tools:
         if not is_json_mapping(tool):
@@ -86,9 +83,7 @@ def validate_tool_types(tools: list[JsonValue], *, allow_image_generation: bool 
                 tool = dict(tool_mapping)
                 tool["type"] = normalized_type
                 tool_type = normalized_type
-            if tool_type in _UNSUPPORTED_TOOL_TYPES or (
-                tool_type in _RESPONSES_ONLY_TOOL_TYPES and not allow_image_generation
-            ):
+            if not allow_builtin_tools and tool_type in UNSUPPORTED_TOOL_TYPES:
                 raise ValueError(f"Unsupported tool type: {tool_type}")
         normalized_tools.append(tool)
     return normalized_tools
@@ -369,9 +364,7 @@ class ResponsesRequest(BaseModel):
     @field_validator("store")
     @classmethod
     def _ensure_store_false(cls, value: bool | None) -> bool:
-        if value is True:
-            raise ValueError("store must be false")
-        return False if value is None else value
+        return False
 
     @field_validator("previous_response_id")
     @classmethod
@@ -384,7 +377,7 @@ class ResponsesRequest(BaseModel):
     @field_validator("tools")
     @classmethod
     def _validate_tools(cls, value: list[JsonValue]) -> list[JsonValue]:
-        return validate_tool_types(value, allow_image_generation=True)
+        return validate_tool_types(value, allow_builtin_tools=True)
 
     @field_validator("tool_choice")
     @classmethod
@@ -451,9 +444,7 @@ class ResponsesCompactRequest(BaseModel):
     @field_validator("store")
     @classmethod
     def _ensure_store_false(cls, value: bool) -> bool:
-        if value is True:
-            raise ValueError("store must be false")
-        return value
+        return False
 
     def to_payload(self) -> JsonObject:
         payload: MutableJsonObject = self.model_dump(mode="json", exclude_none=True)
@@ -516,6 +507,9 @@ def _sort_keys_recursive(value: JsonValue) -> JsonValue:
 def _strip_compact_unsupported_fields(payload: MutableJsonObject) -> MutableJsonObject:
     payload = _strip_unsupported_fields(payload)
     payload.pop("store", None)
+    payload.pop("tools", None)
+    payload.pop("tool_choice", None)
+    payload.pop("parallel_tool_calls", None)
     return payload
 
 
