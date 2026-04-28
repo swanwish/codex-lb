@@ -287,11 +287,13 @@ const resetDateFormatter = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  hourCycle: "h23",
 });
 
 const resetTimeFormatter = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   minute: "2-digit",
+  hourCycle: "h23",
 });
 
 export function formatAbsoluteResetTime(date: Date): string {

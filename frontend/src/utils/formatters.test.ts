@@ -6,6 +6,7 @@ import {
   formatChartDateTime,
   formatDateTimeInline,
   formatAccessTokenLabel,
+  formatAbsoluteResetTime,
   formatCachedTokensMeta,
   formatCompactNumber,
   formatCountdown,
@@ -137,6 +138,16 @@ describe("formatters", () => {
     expect(formatQuotaResetLabel("1970-01-01T00:00:00.000Z")).toBe(RESET_ERROR_LABEL);
     expect(formatQuotaResetLabel("bad-date")).toBe(RESET_ERROR_LABEL);
     expect(formatQuotaResetMeta(null, null)).toBe("Quota reset unavailable");
+  });
+
+  it("formats quota reset absolute times with a 24-hour clock", () => {
+    const now = new Date(Date.now());
+    const todayAfternoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 5);
+    const futureEvening = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 21, 7);
+
+    expect(formatAbsoluteResetTime(todayAfternoon)).toBe("Today, 13:05");
+    expect(formatAbsoluteResetTime(futureEvening)).toContain("21:07");
+    expect(formatQuotaResetLabel(futureEvening.toISOString())).not.toMatch(/AM|PM/);
   });
 
   it("truncates long text safely", () => {
