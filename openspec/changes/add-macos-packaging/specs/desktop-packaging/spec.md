@@ -24,6 +24,12 @@ The macOS packaging flow MUST bundle the dashboard static assets, bundled config
 - **AND** startup migrations can still locate the bundled Alembic scripts
 - **AND** runtime bundled config reads still resolve without requiring repository-relative files
 
+#### Scenario: long-running packaged service retains dashboard assets
+
+- **WHEN** a recipient starts the installed macOS service and leaves it running for multiple days
+- **THEN** the dashboard static assets remain available from the installed runtime directory
+- **AND** frontend requests do not depend on a PyInstaller onefile temporary extraction directory that macOS may clean up during runtime
+
 ### Requirement: packaged macOS builds read env files from the executable directory
 
 When the service runs from a packaged macOS executable, it MUST read `.env` and `.env.local` from the executable directory instead of the transient unpack location used by the packager. For installed PKG builds, it MUST also support user overrides from the macOS user data directory so the installed `codex-lb` command can run without editing files inside system-owned install paths, while still honoring the legacy `~/.codex-lb` layout during upgrades.

@@ -206,6 +206,7 @@ VERSION="$(cd "${ROOT_DIR}" && project_version)"
 WRAPPER_TEMPLATE="${ROOT_DIR}/packaging/macos/bin/${APP_NAME}"
 ENV_TEMPLATE="${ROOT_DIR}/packaging/macos/.env.example"
 PYI_DIST_DIR="${ROOT_DIR}/dist/pyinstaller/${PLATFORM_ID}"
+PYI_BUNDLE_DIR="${PYI_DIST_DIR}/${APP_NAME}"
 PYI_WORK_DIR="${ROOT_DIR}/build/pyinstaller/${PLATFORM_ID}"
 PKG_ROOT="${ROOT_DIR}/build/pkgroot/${PLATFORM_ID}"
 RELEASE_DIR="${ROOT_DIR}/dist/${ARCHIVE_PREFIX}-${ARCH}"
@@ -231,13 +232,13 @@ uv run --extra metrics --extra tracing --with pyinstaller==6.16.0 \
   packaging/pyinstaller/macos.spec
 popd >/dev/null
 
-BINARY_PATH="${PYI_DIST_DIR}/${APP_NAME}"
+BINARY_PATH="${PYI_BUNDLE_DIR}/${APP_NAME}"
 if [[ ! -x "${BINARY_PATH}" ]]; then
   echo "PyInstaller did not produce ${BINARY_PATH}" >&2
   exit 1
 fi
 
-cp "${BINARY_PATH}" "${RELEASE_DIR}/${APP_NAME}"
+cp -R "${PYI_BUNDLE_DIR}/." "${RELEASE_DIR}/"
 cp "${ENV_TEMPLATE}" "${RELEASE_DIR}/.env.example"
 cp "${ROOT_DIR}/packaging/macos/README.txt" "${RELEASE_DIR}/README.txt"
 chmod +x "${RELEASE_DIR}/${APP_NAME}"
@@ -246,9 +247,7 @@ if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
   codesign_executable "${RELEASE_DIR}/${APP_NAME}"
 fi
 
-cp "${RELEASE_DIR}/${APP_NAME}" "${PKG_ROOT}${INSTALL_ROOT}/${APP_NAME}"
-cp "${ENV_TEMPLATE}" "${PKG_ROOT}${INSTALL_ROOT}/.env.example"
-cp "${ROOT_DIR}/packaging/macos/README.txt" "${PKG_ROOT}${INSTALL_ROOT}/README.txt"
+cp -R "${RELEASE_DIR}/." "${PKG_ROOT}${INSTALL_ROOT}/"
 install -m 755 "${WRAPPER_TEMPLATE}" "${PKG_ROOT}${INSTALL_BIN}"
 
 tar -C "${ROOT_DIR}/dist" -czf "${ARCHIVE_PATH}" "$(basename "${RELEASE_DIR}")"

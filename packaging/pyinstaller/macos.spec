@@ -69,11 +69,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
     name=APP_NAME,
+    exclude_binaries=True,
     console=True,
     strip=False,
     upx=False,
@@ -83,4 +81,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=CODE_SIGN_IDENTITY,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name=APP_NAME,
 )

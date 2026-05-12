@@ -41,6 +41,8 @@ PKG 安装完成后，关键路径如下：
 - 运行时文件：`/Library/Application Support/codex-lb/`
 - 新安装的默认用户配置/数据目录：`~/Library/Application Support/codex-lb/`
 
+安装目录里的运行时文件是 PyInstaller onedir bundle 的持久副本，包含可执行文件和 `_internal/` 下的依赖、dashboard static assets、Alembic 脚本等资源。不要把 macOS 发行包改回 PyInstaller onefile：onefile 会在启动时解压到系统临时目录，长时间运行的服务可能在 macOS 清理临时目录后丢失这些资源。
+
 兼容性说明：
 
 - 如果用户过去已经在 `~/.codex-lb/` 下运行过旧版本，安装后的新命令仍会继续兼容这个旧目录
@@ -207,6 +209,8 @@ codex-lb --host 127.0.0.1 --port 2456
   先运行 `codex-lb init`
 - 浏览器打不开 dashboard
   先访问 `/health` 确认服务是否已启动
+- 浏览器返回 `Frontend assets are missing`
+  确认安装目录中保留了完整的 onedir runtime，尤其是 `_internal/app/static/index.html`；如果只分发或安装了单个 `codex-lb` 文件，需要重新用当前 macOS 打包流程生成 PKG/tar.gz
 - `2455` 端口被占用
   换一个端口启动，并同步更新客户端地址
 - OAuth 回调没有完成
