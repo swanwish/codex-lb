@@ -6,6 +6,7 @@
 ## 2. Tests
 
 - [x] 2.1 Add unit coverage for packaged-runtime env file loading.
+- [x] 2.2 Add regression coverage that macOS packaging stages a durable PyInstaller onedir bundle.
 
 ## 3. Implementation
 
@@ -20,3 +21,4 @@
 - [x] 3.9 Install a `codex-lb` Terminal launcher from the macOS PKG so recipients can start the service without copying the package contents.
 - [x] 3.10 Load packaged runtime overrides from the macOS user data directory for PKG-based installs while keeping `~/.codex-lb` upgrade compatibility.
 - [x] 3.11 Add a lightweight `codex-lb init` command that prepares the user override file after installation.
+- [x] 3.12 Stage the entire PyInstaller onedir bundle in macOS archive and PKG artifacts.
