@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from typing import Final, cast
 
-from fastapi import APIRouter, Body, Depends, File, Form, Request, Response, Security, UploadFile, WebSocket
+from fastapi import APIRouter, Body, Depends, File, Form, Path, Request, Response, Security, UploadFile, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -21,6 +21,7 @@ from app.core.auth.dependencies import (
     validate_proxy_api_key_authorization,
     validate_usage_api_key,
 )
+from app.core.clients.files import FileProxyError
 from app.core.clients.proxy import ProxyResponseError
 from app.core.config.settings import get_settings
 from app.core.config.settings_cache import get_settings_cache
@@ -50,7 +51,7 @@ from app.core.runtime_logging import log_error_response
 from app.core.types import JsonValue
 from app.core.usage.types import UsageWindowRow
 from app.core.utils.json_guards import is_json_mapping
-from app.core.utils.sse import format_sse_event, parse_sse_data_json
+from app.core.utils.sse import format_sse_event, inject_sse_keepalives, parse_sse_data_json
 from app.db.models import Account, AccountStatus, UsageHistory
 from app.db.session import get_background_session
 from app.dependencies import ProxyContext, get_proxy_context, get_proxy_websocket_context
@@ -79,6 +80,7 @@ from app.modules.proxy.request_policy import (
 from app.modules.proxy.schemas import (
     CodexModelEntry,
     CodexModelsResponse,
+    FileCreateRequest,
     ModelListItem,
     ModelListResponse,
     ModelMetadata,
@@ -136,6 +138,11 @@ usage_router = APIRouter(
     dependencies=[Depends(set_openai_error_format)],
 )
 transcribe_router = APIRouter(
+    prefix="/backend-api",
+    tags=["proxy"],
+    dependencies=[Security(validate_proxy_api_key), Depends(set_openai_error_format)],
+)
+files_router = APIRouter(
     prefix="/backend-api",
     tags=["proxy"],
     dependencies=[Security(validate_proxy_api_key), Depends(set_openai_error_format)],
@@ -557,6 +564,103 @@ async def backend_transcribe(
         context=context,
         api_key=api_key,
     )
+
+
+# Synthetic ``model`` strings used for API-key limit accounting +
+# request-log filtering on the file upload protocol. They never reach
+# upstream -- this is a proxy-internal name only.
+_FILES_CREATE_LIMIT_MODEL: Final = "files-create"
+_FILES_FINALIZE_LIMIT_MODEL: Final = "files-finalize"
+
+
+@files_router.post("/files")
+async def backend_files_create(
+    request: Request,
+    payload: FileCreateRequest = Body(...),
+    context: ProxyContext = Depends(get_proxy_context),
+    api_key: ApiKeyData | None = Security(validate_proxy_api_key),
+) -> JSONResponse:
+    """Forward a `POST /backend-api/files` upload registration to upstream.
+
+    Accepts ``{file_name, file_size, use_case}`` and returns the upstream
+    JSON verbatim (typically ``{file_id, upload_url}``) so callers can
+    PUT the bytes directly to the SAS upload URL without going through
+    the proxy. The 16 MiB websocket ceiling on ``/responses`` does not
+    apply here -- upstream caps file size at 512 MiB which we enforce in
+    ``FileCreateRequest``.
+    """
+    reservation = await _enforce_request_limits(
+        api_key,
+        request_model=_FILES_CREATE_LIMIT_MODEL,
+        request_service_tier=None,
+    )
+    try:
+        result = await context.service.create_file(
+            payload.model_dump(mode="json", exclude_none=True),
+            request.headers,
+            api_key=api_key,
+        )
+    except FileProxyError as exc:
+        error = _parse_error_envelope(exc.payload)
+        return _logged_error_json_response(
+            request,
+            exc.status_code,
+            error.model_dump(mode="json", exclude_none=True),
+        )
+    except ProxyResponseError as exc:
+        error = _parse_error_envelope(exc.payload)
+        return _logged_error_json_response(
+            request,
+            exc.status_code,
+            error.model_dump(mode="json", exclude_none=True),
+        )
+    finally:
+        await _release_reservation(reservation)
+    return JSONResponse(content=result)
+
+
+@files_router.post("/files/{file_id}/uploaded")
+async def backend_files_finalize(
+    request: Request,
+    file_id: str = Path(..., min_length=1),
+    context: ProxyContext = Depends(get_proxy_context),
+    api_key: ApiKeyData | None = Security(validate_proxy_api_key),
+) -> JSONResponse:
+    """Forward a `POST /backend-api/files/{file_id}/uploaded` finalize call.
+
+    The upstream contract returns ``{status: success|retry|failed,
+    download_url, file_name, mime_type, ...}``. ``service.finalize_file``
+    polls upstream for up to 30 s while ``status == "retry"``; we return
+    the final payload verbatim so the caller sees what upstream saw.
+    """
+    reservation = await _enforce_request_limits(
+        api_key,
+        request_model=_FILES_FINALIZE_LIMIT_MODEL,
+        request_service_tier=None,
+    )
+    try:
+        result = await context.service.finalize_file(
+            file_id,
+            request.headers,
+            api_key=api_key,
+        )
+    except FileProxyError as exc:
+        error = _parse_error_envelope(exc.payload)
+        return _logged_error_json_response(
+            request,
+            exc.status_code,
+            error.model_dump(mode="json", exclude_none=True),
+        )
+    except ProxyResponseError as exc:
+        error = _parse_error_envelope(exc.payload)
+        return _logged_error_json_response(
+            request,
+            exc.status_code,
+            error.model_dump(mode="json", exclude_none=True),
+        )
+    finally:
+        await _release_reservation(reservation)
+    return JSONResponse(content=result)
 
 
 @v1_router.post("/audio/transcriptions")
@@ -1274,6 +1378,11 @@ def _to_codex_model_entry(model: UpstreamModel) -> CodexModelEntry:
         if key not in skip_keys and isinstance(value, (bool, int, float, str, type(None), list, Mapping)):
             extra[key] = value
 
+    # If context_window is overridden, also override max_context_window to match
+    effective_cw = _effective_context_window(model)
+    if effective_cw != model.context_window and "max_context_window" in extra:
+        extra["max_context_window"] = effective_cw
+
     return CodexModelEntry(
         slug=model.slug,
         display_name=model.display_name,
@@ -1393,7 +1502,10 @@ async def v1_chat_completions(
         stream_options = payload.stream_options
         include_usage = bool(stream_options and stream_options.include_usage)
         return StreamingResponse(
-            stream_chat_chunks(stream_with_first, model=responses_payload.model, include_usage=include_usage),
+            inject_sse_keepalives(
+                stream_chat_chunks(stream_with_first, model=responses_payload.model, include_usage=include_usage),
+                get_settings().sse_keepalive_interval_seconds,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", **rate_limit_headers},
         )
@@ -1495,7 +1607,10 @@ async def _stream_responses(
         first = await stream.__anext__()
     except StopAsyncIteration:
         return StreamingResponse(
-            _prepend_first(None, stream),
+            inject_sse_keepalives(
+                _prepend_first(None, stream),
+                get_settings().sse_keepalive_interval_seconds,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", **rate_limit_headers},
         )
@@ -1509,7 +1624,10 @@ async def _stream_responses(
             headers=rate_limit_headers,
         )
     return StreamingResponse(
-        _prepend_first(first, stream),
+        inject_sse_keepalives(
+            _prepend_first(first, stream),
+            get_settings().sse_keepalive_interval_seconds,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", **turn_state_headers, **rate_limit_headers},
     )
@@ -2055,6 +2173,7 @@ def _merge_collected_output_items(
 async def _normalize_public_responses_stream(stream: AsyncIterator[str]) -> AsyncIterator[str]:
     terminal_seen = False
     contract_violation_kind: str | None = None
+    seen_text_delta_keys: set[tuple[str | None, int | None]] = set()
     async for event_block in stream:
         if event_block.strip() == "data: [DONE]":
             if terminal_seen:
@@ -2071,6 +2190,10 @@ async def _normalize_public_responses_stream(stream: AsyncIterator[str]) -> Asyn
         if normalized_payload is None:
             continue
         event_type = normalized_payload.get("type")
+        if event_type == "response.output_text.delta":
+            seen_text_delta_keys.add(_text_delta_stream_key(normalized_payload))
+        for synthetic_payload in _synthetic_text_delta_events(normalized_payload, seen_text_delta_keys):
+            yield format_sse_event(synthetic_payload)
         if isinstance(event_type, str) and event_type in {
             "response.completed",
             "response.incomplete",
@@ -2138,6 +2261,98 @@ def _normalize_public_stream_payload(
             violation_kind = "invalid_output_item"
         return normalized_payload, violation_kind
     return payload, None
+
+
+def _synthetic_text_delta_events(
+    payload: Mapping[str, JsonValue],
+    seen_text_delta_keys: set[tuple[str | None, int | None]],
+) -> list[dict[str, JsonValue]]:
+    event_type = payload.get("type")
+    if event_type == "response.output_item.done":
+        output_index = payload.get("output_index")
+        item = payload.get("item")
+        if isinstance(output_index, int) and is_json_mapping(item):
+            synthetic = _synthetic_text_delta_for_output_item(output_index, item, seen_text_delta_keys)
+            return [synthetic] if synthetic is not None else []
+    if event_type not in {"response.completed", "response.incomplete"}:
+        return []
+    response = payload.get("response")
+    if not is_json_mapping(response):
+        return []
+    output = response.get("output")
+    if not isinstance(output, list):
+        return []
+
+    synthetic_events: list[dict[str, JsonValue]] = []
+    for output_index, item in enumerate(output):
+        if not is_json_mapping(item):
+            continue
+        synthetic = _synthetic_text_delta_for_output_item(output_index, item, seen_text_delta_keys)
+        if synthetic is not None:
+            synthetic_events.append(synthetic)
+    return synthetic_events
+
+
+def _synthetic_text_delta_for_output_item(
+    output_index: int,
+    item: Mapping[str, JsonValue],
+    seen_text_delta_keys: set[tuple[str | None, int | None]],
+) -> dict[str, JsonValue] | None:
+    normalized_item = _normalize_public_output_item(item)
+    if normalized_item is None:
+        return None
+    text = _extract_public_output_item_text(normalized_item)
+    if text is None:
+        return None
+    key = _output_item_stream_key(output_index, normalized_item)
+    if _seen_text_delta_for_output_item(key, seen_text_delta_keys):
+        return None
+    seen_text_delta_keys.add(key)
+
+    event: dict[str, JsonValue] = {
+        "type": "response.output_text.delta",
+        "output_index": output_index,
+        "content_index": 0,
+        "delta": text,
+    }
+    item_id = normalized_item.get("id")
+    if isinstance(item_id, str) and item_id:
+        event["item_id"] = item_id
+    return event
+
+
+def _text_delta_stream_key(payload: Mapping[str, JsonValue]) -> tuple[str | None, int | None]:
+    item_id = payload.get("item_id")
+    output_index = payload.get("output_index")
+    return (
+        item_id if isinstance(item_id, str) and item_id else None,
+        output_index if isinstance(output_index, int) else None,
+    )
+
+
+def _output_item_stream_key(
+    output_index: int,
+    item: Mapping[str, JsonValue],
+) -> tuple[str | None, int | None]:
+    item_id = item.get("id")
+    return (item_id if isinstance(item_id, str) and item_id else None, output_index)
+
+
+def _seen_text_delta_for_output_item(
+    key: tuple[str | None, int | None],
+    seen_text_delta_keys: set[tuple[str | None, int | None]],
+) -> bool:
+    item_id, output_index = key
+    return any(
+        candidate in seen_text_delta_keys
+        for candidate in (
+            key,
+            (item_id, None) if item_id is not None else None,
+            (None, output_index) if output_index is not None else None,
+            (None, None),
+        )
+        if candidate is not None
+    )
 
 
 def _normalize_public_response_mapping(
