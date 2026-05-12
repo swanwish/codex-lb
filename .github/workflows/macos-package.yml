@@ -175,6 +175,42 @@ jobs:
 
           ./scripts/build_macos_executable.sh "${args[@]}"
 
+      - name: Fetch notarytool log on failure
+        if: ${{ failure() && inputs.notarize_artifacts == true }}
+        shell: bash
+        env:
+          CODEX_LB_MACOS_NOTARY_APPLE_ID: ${{ secrets.CODEX_LB_MACOS_NOTARY_APPLE_ID }}
+          CODEX_LB_MACOS_NOTARY_TEAM_ID: ${{ secrets.CODEX_LB_MACOS_NOTARY_TEAM_ID }}
+          CODEX_LB_MACOS_NOTARY_APP_PASSWORD: ${{ secrets.CODEX_LB_MACOS_NOTARY_APP_PASSWORD }}
+        run: |
+          set +e
+          if [[ -z "${CODEX_LB_MACOS_NOTARY_APPLE_ID:-}" \
+            || -z "${CODEX_LB_MACOS_NOTARY_TEAM_ID:-}" \
+            || -z "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD:-}" ]]; then
+            echo "Notary credentials unavailable; skipping log fetch." >&2
+            exit 0
+          fi
+          echo "Recent notarization submissions:"
+          xcrun notarytool history \
+            --apple-id "${CODEX_LB_MACOS_NOTARY_APPLE_ID}" \
+            --team-id "${CODEX_LB_MACOS_NOTARY_TEAM_ID}" \
+            --password "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD}" || true
+          submission_id="$(xcrun notarytool history \
+            --apple-id "${CODEX_LB_MACOS_NOTARY_APPLE_ID}" \
+            --team-id "${CODEX_LB_MACOS_NOTARY_TEAM_ID}" \
+            --password "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD}" \
+            --output-format json 2>/dev/null \
+            | python3 -c 'import json,sys;h=json.load(sys.stdin).get("history",[]);print(h[0]["id"] if h else "")')"
+          if [[ -z "${submission_id}" ]]; then
+            echo "No submission id available; cannot fetch notarytool log." >&2
+            exit 0
+          fi
+          echo "Fetching notarytool log for ${submission_id}..."
+          xcrun notarytool log "${submission_id}" \
+            --apple-id "${CODEX_LB_MACOS_NOTARY_APPLE_ID}" \
+            --team-id "${CODEX_LB_MACOS_NOTARY_TEAM_ID}" \
+            --password "${CODEX_LB_MACOS_NOTARY_APP_PASSWORD}" || true
+
       - name: Upload macOS package artifacts
         uses: actions/upload-artifact@v7
         with:

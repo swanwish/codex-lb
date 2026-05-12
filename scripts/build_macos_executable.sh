@@ -128,19 +128,33 @@ print(data["project"]["version"])
 PY
 }
 
-codesign_executable() {
-  local path="$1"
+codesign_bundle() {
+  local bundle_dir="$1"
 
   require_env_var CODEX_LB_MACOS_CODESIGN_IDENTITY
+  local identity="${CODEX_LB_MACOS_CODESIGN_IDENTITY}"
+  local -a sign_args=(--force --timestamp --options runtime --sign "${identity}")
 
-  echo "Codesigning ${path}..."
-  codesign \
-    --force \
-    --timestamp \
-    --options runtime \
-    --sign "${CODEX_LB_MACOS_CODESIGN_IDENTITY}" \
-    "${path}"
-  codesign --verify --strict --verbose=2 "${path}"
+  echo "Codesigning bundled Mach-O files in ${bundle_dir}..."
+
+  while IFS= read -r -d '' file; do
+    codesign "${sign_args[@]}" "${file}"
+  done < <(find "${bundle_dir}" -type f \( -name '*.so' -o -name '*.dylib' \) -print0)
+
+  while IFS= read -r -d '' file; do
+    if /usr/bin/file -b "${file}" | grep -q 'Mach-O'; then
+      codesign "${sign_args[@]}" "${file}"
+    fi
+  done < <(find "${bundle_dir}" -type f ! -name '*.so' ! -name '*.dylib' ! -path "${bundle_dir}/${APP_NAME}" -print0)
+
+  while IFS= read -r -d '' framework; do
+    codesign "${sign_args[@]}" "${framework}"
+  done < <(find "${bundle_dir}" -type d -name '*.framework' -print0)
+
+  echo "Codesigning ${bundle_dir}/${APP_NAME}..."
+  codesign "${sign_args[@]}" "${bundle_dir}/${APP_NAME}"
+
+  codesign --verify --deep --strict --verbose=2 "${bundle_dir}/${APP_NAME}"
 }
 
 create_pkg() {
@@ -244,7 +258,7 @@ cp "${ROOT_DIR}/packaging/macos/README.txt" "${RELEASE_DIR}/README.txt"
 chmod +x "${RELEASE_DIR}/${APP_NAME}"
 
 if [[ "${SIGN_ARTIFACTS}" == "true" ]]; then
-  codesign_executable "${RELEASE_DIR}/${APP_NAME}"
+  codesign_bundle "${RELEASE_DIR}"
 fi
 
 cp -R "${RELEASE_DIR}/." "${PKG_ROOT}${INSTALL_ROOT}/"
